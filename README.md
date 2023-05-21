@@ -1,6 +1,6 @@
 # ezshare_cpap
 
-Mac OSX script to pull CPAP Data from an Airsense 10 to a local machine for upload to SleepHQ
+Mac OSX script to pull CPAP Data from an Airsense 10 to a local machine for upload to SleepHQ. It might work with the Airsense 11 as well but I haven't tested it. Presumably if the directory structure and files are the same on the Airsense 11, it'll work no problem.
 
 The script connects to the EZ Share WiFi SD card and synchronizes the data to a folder on your desktop called SD\_Card.
 
@@ -50,6 +50,14 @@ That's it. The script is ready to use. The script will install the ezshare CLI a
 ```
 
 # Frequently Asked Questions
+
+### Does it work with the Resmed Airsense 11?
+
+I don't know... does it?
+
+### Does it work with INSERT\_CPAP\_MACHINE\_HERE?
+
+The only machine i've tested it with is the Airsense 10.
 
 ### Help! I entered the wrong WiFi credentials!
 
