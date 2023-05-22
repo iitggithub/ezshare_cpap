@@ -46,6 +46,13 @@ if [ ! -d ${sdCardDir} ]
   mkdir ${sdCardDir}
 fi
 
+# Default list of files to always include in upload zip file
+fileList="${sdCardDir}/Identification.crc"
+fileList="${fileList} ${sdCardDir}/Identification.tgt"
+fileList="${fileList} ${sdCardDir}/Journal.dat"
+fileList="${fileList} ${sdCardDir}/SETTINGS"
+fileList="${fileList} ${sdCardDir}/STR.edf"
+
 # Get the WiFi adaptor name. If there's multiple it
 # will choose the first one in the list. Typically
 # this is en0.
@@ -168,6 +175,14 @@ fi
 ezShareConnected=1 # Ensures we reconnect to the home wifi network if anything fails
 echo "done!"
 
+# Added to fix a bug in ezshare CLI which only adds files that have changed in size
+# this meant that minor changes to settings were not be captured.
+for target in ${fileList}
+  do
+  test -f ${target} && rm -f ${target}
+  test -d ${target} && rm -rf ${target}
+done
+
 echo
 echo "Starting SD card sync at `date`"
 echo
@@ -184,12 +199,6 @@ ezShareConnected=0 # disables automatic reconnection to home wifi
 
 firstDir=""
 lastDir=""
-# Default list of files to always include in upload zip file
-fileList="${sdCardDir}/Identification.crc"
-fileList="${fileList} ${sdCardDir}/Identification.tgt"
-fileList="${fileList} ${sdCardDir}/Journal.dat"
-fileList="${fileList} ${sdCardDir}/SETTINGS"
-fileList="${fileList} ${sdCardDir}/STR.edf"
 
 # Add the remaining directories to the list
 for dir in `cat ${fileSyncLog} | grep "100%" | cut -f1 -d ':' | grep DATALOG | awk -F '/' '{print $(NF -1)}' | sort | uniq`
