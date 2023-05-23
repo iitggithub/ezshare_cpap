@@ -1,5 +1,5 @@
 #! /bin/bash -e
-
+VERSION=3
 # Script to sync data from an Ez Share WiFi SD card
 # to a folder called "SD_Card" on the local users desktop.
 
@@ -18,6 +18,28 @@ exit_function() {
   trap - INT TERM EXIT
   exit
 }
+
+# Automatically updates the script to the latest version
+# to make it easier for those who need it
+version_check() {
+  lv="`curl -ks https://raw.githubusercontent.com/iitggithub/ezshare_cpap/main/sync.sh | grep "^# VERSION=" | cut -f2 -d '='`"
+  cv="`grep "^# VERSION=" $0 | cut -f2 -d '='`"
+
+  if [ -z "${cv}" ]
+    then
+    cv=0
+  fi
+
+  if [ ${lv} -gt ${cv} ]
+    then
+    echo "Script update available. Auto-update from version ${cv} to ${lv} in progress..."
+    curl -o $0 https://raw.githubusercontent.com/iitggithub/ezshare_cpap/main/sync.sh
+    echo "Done. Relaunching $0"
+    $0
+    exit
+  fi
+}
+version_check
 
 # Make sure we only run the script on a mac
 # Not sure what would happen if you ran it on Linux
