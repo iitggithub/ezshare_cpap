@@ -1,5 +1,5 @@
 #! /bin/bash -e
-VERSION=3
+# VERSION=3
 # Script to sync data from an Ez Share WiFi SD card
 # to a folder called "SD_Card" on the local users desktop.
 
@@ -22,7 +22,7 @@ exit_function() {
 # Automatically updates the script to the latest version
 # to make it easier for those who need it
 version_check() {
-  lv="`curl -ks https://raw.githubusercontent.com/iitggithub/ezshare_cpap/main/sync.sh | grep "^# VERSION=" | cut -f2 -d '='`"
+  lv="`curl -ks -o - https://raw.githubusercontent.com/iitggithub/ezshare_cpap/main/sync.sh | grep "^# VERSION=" | cut -f2 -d '='`"
   cv="`grep "^# VERSION=" $0 | cut -f2 -d '='`"
 
   if [ -z "${cv}" ]
