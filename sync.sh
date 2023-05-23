@@ -199,7 +199,6 @@ ezShareConnected=0 # disables automatic reconnection to home wifi
 
 firstDir=""
 lastDir=""
-filelist="" # Reset the file list to fix bug where updated settings are not being synchronized
 
 # Add the remaining directories to the list
 for dir in `cat ${fileSyncLog} | grep "100%" | cut -f1 -d ':' | grep DATALOG | awk -F '/' '{print $(NF -1)}' | sort | uniq`
