@@ -8,6 +8,8 @@ If there is sleep data, the script will create a zip file called upload.zip whic
 
 The script doesn't store any WiFi credentials in the script itself. Instead, it will store them in your Login Keychain. When you first run the script, it will prompt you for the WiFi SSID and Password for both the Ez Share SD card, and your home WiFi network. Once these details are saved in your Keychain, you don't have to enter them again.
 
+The script will automatically update itself when new features are added so you don't have to.
+
 # Installation Pre-requisites
 
 - A mac. Because the script only works on a mac
@@ -50,6 +52,10 @@ That's it. The script is ready to use. The script will install the ezshare CLI a
 ```
 
 # Frequently Asked Questions
+
+### My script isn't automatically updating itself
+
+Either there's no update available or you're probably running the original version of the script which didn't include the automatic update feature. Simply re-install the script to obtain the latest version which includes this feature.
 
 ### Does it work with the Resmed Airsense 11?
 

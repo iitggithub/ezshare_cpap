@@ -3,11 +3,26 @@
 # Script to sync data from an Ez Share WiFi SD card
 # to a folder called "SD_Card" on the local users desktop.
 
+ezShareSyncInProgress=0 # Added to allow the removal of partially sync'd directories
+
 # Exit function which makes sure we clean up
 # after ourselves and reconnect to the home WiFi
 # if we're not already connected to it.
 exit_function() {
+  if [ ${ezShareSyncInProgress} -eq 1 ]
+    then
+    echo "Something went wrong with the sync. Rolling back changes in the DATALOG directory..."
+    echo
+    for dir in `cat ${fileSyncLog} | grep "100%" | cut -f1 -d ':' | grep DATALOG | awk -F '/' '{print $(NF -1)}' | sort | uniq`
+      do
+      echo "Removing ${sdCardDir}/DATALOG/${dir}"
+      rm -rf ${sdCardDir}/DATALOG/${dir}
+    done
+    echo
+    echo "Cleanup complete"
+  fi
   test -f ${fileSyncLog} && rm -f ${fileSyncLog}
+
   if [[ ${ezShareConnected} -eq 1 ]]
     then
     echo
@@ -78,7 +93,7 @@ fileList="${fileList} ${sdCardDir}/STR.edf"
 # Get the WiFi adaptor name. If there's multiple it
 # will choose the first one in the list. Typically
 # this is en0.
-wifiAdaptor="`networksetup -listallhardwareports | grep -A1 'Wi-Fi' | grep 'Device' | head -1 | awk '{print $2}'`"
+wifiAdaptor="`networksetup -listallhardwareports 2>/dev/null | grep -A1 'Wi-Fi' | grep 'Device' | head -1 | awk '{print $2}'`"
 
 # Can't continue without a WiFi adaptor...
 if [ -z "${wifiAdaptor}" ]
@@ -143,7 +158,7 @@ fi
 # the user hasn't got their own WiFi details set correctly
 echo
 echo -n "Checking WiFi connectivity to ${homeWiFiSSID}... "
-if [ -n "`networksetup -setairportnetwork ${wifiAdaptor} \"${homeWiFiSSID}\" \"${homeWiFiPassword}\"`" ]
+if [ -n "`networksetup -setairportnetwork ${wifiAdaptor} \"${homeWiFiSSID}\" \"${homeWiFiPassword}\" 2>/dev/null`" ]
   then
   echo -e "\n\nFailed to connect to the WiFi network '${homeWiFiSSID}'."
   echo "Continuing will potentially leave you unable to connect to your"
@@ -175,7 +190,7 @@ if [ -z "`which ezshare-cli`" ]
     echo
     echo "Installing ezshare-cli via pip.."
     echo
-    pip install ezshare || exit_function
+    pip install ezshare || exit
     ezShareCLICmd="`which ezshare-cli`"
     echo
     else
@@ -188,7 +203,7 @@ fi
 
 echo -n "Connecting to WiFi network '${ezShareWifiSSID}'... "
 trap exit_function INT TERM EXIT
-if [ -n "`networksetup -setairportnetwork ${wifiAdaptor} \"${ezShareWifiSSID}\" \"${ezShareWiFiPassword}\"`" ]
+if [ -n "`networksetup -setairportnetwork ${wifiAdaptor} \"${ezShareWifiSSID}\" \"${ezShareWiFiPassword}\" 2>/dev/null`" ]
   then
   echo -e "\n\nFailed to connect to ez Share WiFi network. Please make sure your SSID and password"
   echo "are correct and the ez Share WiFi SD card is powered on."
@@ -208,7 +223,9 @@ done
 echo
 echo "Starting SD card sync at `date`"
 echo
+ezShareSyncInProgress=1
 ${ezShareCLICmd} -w -r -d / -t ${sdCardDir}/ 2>&1 | tee ${fileSyncLog}
+ezShareSyncInProgress=0
 
 echo
 echo "SD card sync complete at `date`"
