@@ -1,5 +1,5 @@
 #! /bin/bash -e
-# VERSION=3
+# VERSION=4
 # Script to sync data from an Ez Share WiFi SD card
 # to a folder called "SD_Card" on the local users desktop.
 
