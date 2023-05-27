@@ -1,5 +1,5 @@
 #! /bin/bash -e
-# VERSION=4
+# VERSION=5
 # Script to sync data from an Ez Share WiFi SD card
 # to a folder called "SD_Card" on the local users desktop.
 
@@ -37,12 +37,17 @@ exit_function() {
 # Automatically updates the script to the latest version
 # to make it easier for those who need it
 version_check() {
-  lv="`curl -ks -o - https://raw.githubusercontent.com/iitggithub/ezshare_cpap/main/sync.sh | grep "^# VERSION=" | cut -f2 -d '='`"
-  cv="`grep "^# VERSION=" $0 | cut -f2 -d '='`"
+  lv="`curl -ks -o - https://raw.githubusercontent.com/iitggithub/ezshare_cpap/main/sync.sh 2>/dev/null | grep "^# VERSION=" | cut -f2 -d '='`"
+  cv="`grep "^# VERSION=" $0 2>/dev/null | cut -f2 -d '='`"
+
+  if [ -z "${lv}" ]
+    then
+    lv=0 # something went wrong fetching latest version. Default to no update.
+  fi
 
   if [ -z "${cv}" ]
     then
-    cv=0
+    cv=0 # this version of the script doesn't have version checking enabled. Try to force an update.
   fi
 
   if [ ${lv} -gt ${cv} ]
@@ -59,7 +64,7 @@ version_check
 # Make sure we only run the script on a mac
 # Not sure what would happen if you ran it on Linux
 # ... would probably break a lot of stuff..
-if [ "`uname | grep -c Darwin`" -eq 0 ]
+if [ "`uname 2>/dev/null | grep -c Darwin`" -eq 0 ]
   then
   echo "This script can only be run on a Mac (Darwin)."
   exit 1
