@@ -1,5 +1,5 @@
 #! /bin/bash -e
-# VERSION=5
+# VERSION=6
 # Script to sync data from an Ez Share WiFi SD card
 # to a folder called "SD_Card" on the local users desktop.
 
@@ -22,6 +22,8 @@ exit_function() {
     echo "Cleanup complete"
   fi
   test -f ${fileSyncLog} && rm -f ${fileSyncLog}
+  test -f ${localFileList} && rm -f ${localFileList}
+  test -f ${sdCardFileList} && rm -f ${sdCardFileList}
 
   if [[ ${ezShareConnected} -eq 1 ]]
     then
@@ -89,11 +91,11 @@ if [ ! -d ${sdCardDir} ]
 fi
 
 # Default list of files to always include in upload zip file
-fileList="${sdCardDir}/Identification.crc"
-fileList="${fileList} ${sdCardDir}/Identification.tgt"
-fileList="${fileList} ${sdCardDir}/Journal.dat"
-fileList="${fileList} ${sdCardDir}/SETTINGS"
-fileList="${fileList} ${sdCardDir}/STR.edf"
+fileList="Identification.crc"
+fileList="${fileList} Identification.tgt"
+fileList="${fileList} Journal.dat"
+fileList="${fileList} SETTINGS"
+fileList="${fileList} STR.edf"
 
 # Get the WiFi adaptor name. If there's multiple it
 # will choose the first one in the list. Typically
@@ -179,10 +181,14 @@ echo "PASS!"
 # need to be added to the zip file
 if [ -d "/var/tmp" ]
   then
-  fileSyncLog="/var/tmp/sync.log"
+  tmpDir="/var/tmp"
   else
-  fileSyncLog="/tmp/sync.log"
+  tmpDir="/tmp"
 fi
+
+fileSyncLog="${tmpDir}/sync.log"
+localFileList="${tmpDir}/sync.localFileList.log"
+sdCardFileList="${tmpDir}/sync.sdCardFileList.log"
 
 # Check if the ezshare-cli command is available
 # If not install it via pip if python is installed
@@ -228,9 +234,58 @@ done
 echo
 echo "Starting SD card sync at `date`"
 echo
+
+# Generate a list of directories that are already present on the
+# local system.
+find ${sdCardDir}/DATALOG -mindepth 1 -maxdepth 1 -type d -name "20*" | awk -F '/' '{print $NF}' | sort -n | uniq >${localFileList}
+
 ezShareSyncInProgress=1
-${ezShareCLICmd} -w -r -d / -t ${sdCardDir}/ 2>&1 | tee ${fileSyncLog}
+
+# Get a list of directories in the DATALOG directory on the SD Card
+# only sync the directories that are missing from the local system
+# An arbitrary sleep value was also added because it sometimes takes
+# a few seconds before the web interface can be accessed.
+sleep 5
+curl -s "http://192.168.4.1/dir?dir=DATALOG" | tee ${sdCardFileList}
+
+for dir in `cat ${sdCardFileList} | grep "DATALOG%5C20" | cut -f2 -d '"' | sed -e 's/dir\?dir=DATALOG%5C//' | sort -n | uniq`
+  do
+  echo "Checking ${dir}..."
+  # If the directory exists on the sd card, but not in
+  # the localFileList, we need to sync it to the local
+  # filesystem
+  if [ -z "`grep -o \"${dir}\" ${localFileList}`" ]
+    then
+    mkdir -vp ${sdCardDir}/DATALOG/${dir}
+    echo "Connecting to ezshare card to sync DATALOG/${dir} to ${sdCardDir}/DATALOG/${dir}..."
+    ${ezShareCLICmd} -w -d DATALOG/${dir} -t ${sdCardDir}/DATALOG/${dir} 2>&1 | tee -a ${fileSyncLog}
+  fi
+done
 ezShareSyncInProgress=0
+
+# Added to fix a bug in ezshare CLI which only adds files that have changed in size
+# this meant that minor changes to settings were not be captured.
+for target in ${fileList}
+  do
+  if [[ ${target} =~ ^/$ ]]
+    then
+    echo "Skipping removal of target ${target}. This is almost certainly a bug"
+    echo "and should be reported here: https://github.com/iitggithub/ezshare_cpap/issues"
+    continue
+  fi
+  remoteTargetFile="`echo ${target} | awk -F '/' '{print $NF}'`"
+  if [ -f ${target} ]
+    then
+    rm -f ${target}
+  fi
+  if [ -d ${target} ]
+    then
+    rm -rf ${target}
+    mkdir -p ${target}
+  fi
+  echo "Connecting to ezshare card to sync /${remoteTargetFile} to ${target}..."
+  ${ezShareCLICmd} -w -d /${remoteTargetFile} -t ${sdCardDir}/${target} 2>&1 | tee -a ${fileSyncLog}
+done
 
 echo
 echo "SD card sync complete at `date`"
@@ -251,7 +306,7 @@ for dir in `cat ${fileSyncLog} | grep "100%" | cut -f1 -d ':' | grep DATALOG | a
     then
     firstDir="${dir}"
   fi
-  fileList="${fileList} ${sdCardDir}/DATALOG/${dir}"
+  fileList="${fileList} DATALOG/${dir}"
   lastDir="${dir}"
 done
 
@@ -260,6 +315,7 @@ if [ -n "${firstDir}" ]
   then
   echo
   echo "Creating upload.zip file..."
+  cd ${sdCardDir}
   zip -r ${sdCardDir}/upload.zip ${fileList} && echo -e "\nCreated ${sdCardDir}/upload.zip file in ${sdCardDir} which includes dates ${firstDir} to ${lastDir}."
   else
   echo
