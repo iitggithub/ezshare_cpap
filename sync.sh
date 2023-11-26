@@ -1,5 +1,5 @@
 #! /bin/bash -e
-# VERSION=6
+# VERSION=7
 # Script to sync data from an Ez Share WiFi SD card
 # to a folder called "SD_Card" on the local users desktop.
 
@@ -13,11 +13,14 @@ exit_function() {
     then
     echo "Something went wrong with the sync. Rolling back changes in the DATALOG directory..."
     echo
-    for dir in `cat ${fileSyncLog} | grep "100%" | cut -f1 -d ':' | grep DATALOG | awk -F '/' '{print $(NF -1)}' | sort | uniq`
-      do
-      echo "Removing ${sdCardDir}/DATALOG/${dir}"
-      rm -rf ${sdCardDir}/DATALOG/${dir}
-    done
+    if [ -f ${fileSyncLog} ]
+      then
+      for dir in `cat ${fileSyncLog} | grep "100%" | cut -f1 -d ':' | grep DATALOG | awk -F '/' '{print $(NF -1)}' | sort | uniq`
+        do
+        echo "Removing ${sdCardDir}/DATALOG/${dir}"
+        rm -rf ${sdCardDir}/DATALOG/${dir}
+      done
+    fi
     echo
     echo "Cleanup complete"
   fi
@@ -82,6 +85,7 @@ fi
 
 # The location where SD card files will be synchronised:
 sdCardDir="/Users/`whoami`/Desktop/SD_Card"
+uploadZipFile="${sdCardDir}/upload.zip" # Zip file containing files needing to be uploaded
 
 # Create the SD card directory if it doesn't exist
 if [ ! -d ${sdCardDir} ]
@@ -212,24 +216,41 @@ if [ -z "`which ezshare-cli`" ]
   ezShareCLICmd="`which ezshare-cli`" 
 fi
 
-echo -n "Connecting to WiFi network '${ezShareWifiSSID}'... "
 trap exit_function INT TERM EXIT
-if [ -n "`networksetup -setairportnetwork ${wifiAdaptor} \"${ezShareWifiSSID}\" \"${ezShareWiFiPassword}\" 2>/dev/null`" ]
+attempt=0
+while [ ${attempt} -lt 5 ]
+  do
+  echo -n "Connecting to WiFi network '${ezShareWifiSSID}'... "
+  if [ -n "`networksetup -setairportnetwork ${wifiAdaptor} \"${ezShareWifiSSID}\" \"${ezShareWiFiPassword}\" 2>/dev/null`" ]
+    then
+    echo -e "\n\nFailed to connect to ez Share WiFi network."
+    echo
+    echo -n "Trying again in 10 seconds or press Control + C to exit"
+    i=0
+    while [ ${i} -lt 10 ]
+      do
+      echo -n "."
+      sleep 1
+      ((i+=1))
+    done
+    echo
+    echo
+    else
+    echo "done!"
+    ezShareConnected=1 # Ensures we reconnect to the home wifi network if anything fails
+    break # we're connected to the WiFi network now..
+  fi
+  ((attempt+=1))
+done
+
+# Make sure we don't continue if 5 attempts if attempts > 5
+# this means we tried and failed to connect the EzShare WiFi network
+if [ ${attempt} -eq 5 ]
   then
   echo -e "\n\nFailed to connect to ez Share WiFi network. Please make sure your SSID and password"
   echo "are correct and the ez Share WiFi SD card is powered on."
   exit 1
 fi
-ezShareConnected=1 # Ensures we reconnect to the home wifi network if anything fails
-echo "done!"
-
-# Added to fix a bug in ezshare CLI which only adds files that have changed in size
-# this meant that minor changes to settings were not be captured.
-for target in ${fileList}
-  do
-  test -f ${target} && rm -f ${target}
-  test -d ${target} && rm -rf ${target}
-done
 
 echo
 echo "Starting SD card sync at `date`"
@@ -247,7 +268,7 @@ ezShareSyncInProgress=1
 # a few seconds before the web interface can be accessed.
 sleep 5
 curl -s "http://192.168.4.1/dir?dir=DATALOG" | tee ${sdCardFileList}
-
+touch ${fileSyncLog}
 for dir in `cat ${sdCardFileList} | grep "DATALOG%5C20" | cut -f2 -d '"' | sed -e 's/dir\?dir=DATALOG%5C//' | sort -n | uniq`
   do
   echo "Checking ${dir}..."
@@ -258,7 +279,18 @@ for dir in `cat ${sdCardFileList} | grep "DATALOG%5C20" | cut -f2 -d '"' | sed -
     then
     mkdir -vp ${sdCardDir}/DATALOG/${dir}
     echo "Connecting to ezshare card to sync DATALOG/${dir} to ${sdCardDir}/DATALOG/${dir}..."
-    ${ezShareCLICmd} -w -d DATALOG/${dir} -t ${sdCardDir}/DATALOG/${dir} 2>&1 | tee -a ${fileSyncLog}
+    i=0
+    while [ ${i} -lt 5 ]
+      do
+      echo "Connecting to ezshare card to sync /${remoteTargetFile} to ${target}..."
+      ${ezShareCLICmd} -w -d DATALOG/${dir} -t ${sdCardDir}/DATALOG/${dir} 2>&1 | tee -a ${fileSyncLog}
+      if [ $? -eq 0 ]
+        then
+        break # Break the loop if we've sync'd the file otherwise try again...
+      fi
+      sleep 5
+      ((i+=1))
+    done
   fi
 done
 ezShareSyncInProgress=0
@@ -267,24 +299,35 @@ ezShareSyncInProgress=0
 # this meant that minor changes to settings were not be captured.
 for target in ${fileList}
   do
-  if [[ ${target} =~ ^/$ ]]
+  absTarget="${sdCardDir}/${target}"
+  if [[ ${absTarget} =~ ^/$ ]]
     then
-    echo "Skipping removal of target ${target}. This is almost certainly a bug"
+    echo "Skipping removal of target ${absTarget}. This is almost certainly a bug"
     echo "and should be reported here: https://github.com/iitggithub/ezshare_cpap/issues"
     continue
   fi
-  remoteTargetFile="`echo ${target} | awk -F '/' '{print $NF}'`"
-  if [ -f ${target} ]
+  remoteTargetFile="`echo ${absTarget} | awk -F '/' '{print $NF}'`"
+  if [ -f ${absTarget} ]
     then
-    rm -f ${target}
+    rm -f ${absTarget}
   fi
-  if [ -d ${target} ]
+  if [ -d ${absTarget} ]
     then
-    rm -rf ${target}
-    mkdir -p ${target}
+    rm -rf ${absTarget}
+    mkdir -p ${absTarget}
   fi
-  echo "Connecting to ezshare card to sync /${remoteTargetFile} to ${target}..."
-  ${ezShareCLICmd} -w -d /${remoteTargetFile} -t ${sdCardDir}/${target} 2>&1 | tee -a ${fileSyncLog}
+  i=0
+  while [ ${i} -lt 5 ]
+    do
+    echo "Connecting to ezshare card to sync /${remoteTargetFile} to ${target}..."
+    ${ezShareCLICmd} -w -d /${remoteTargetFile} -t ${absTarget} 2>&1 | tee -a ${fileSyncLog}
+    if [ $? -eq 0 ]
+      then
+      break # Break the loop if we've sync'd the file otherwise try again...
+    fi
+    sleep 5
+    ((i+=1))
+  done
 done
 
 echo
@@ -316,7 +359,8 @@ if [ -n "${firstDir}" ]
   echo
   echo "Creating upload.zip file..."
   cd ${sdCardDir}
-  zip -r ${sdCardDir}/upload.zip ${fileList} && echo -e "\nCreated ${sdCardDir}/upload.zip file in ${sdCardDir} which includes dates ${firstDir} to ${lastDir}."
+  test -f ${uploadZipFile} && rm -f ${uploadZipFile}
+  zip -r ${uploadZipFile} ${fileList} && echo -e "\nCreated ${uploadZipFile} file in ${sdCardDir} which includes dates ${firstDir} to ${lastDir}."
   else
   echo
   echo "No dates detected that needed to be synchronised."
