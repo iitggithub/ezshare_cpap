@@ -1,5 +1,5 @@
 #! /bin/bash -e
-# VERSION=7
+# VERSION=8
 # Script to sync data from an Ez Share WiFi SD card
 # to a folder called "SD_Card" on the local users desktop.
 
@@ -25,8 +25,6 @@ exit_function() {
     echo "Cleanup complete"
   fi
   test -f ${fileSyncLog} && rm -f ${fileSyncLog}
-  test -f ${localFileList} && rm -f ${localFileList}
-  test -f ${sdCardFileList} && rm -f ${sdCardFileList}
 
   if [[ ${ezShareConnected} -eq 1 ]]
     then
@@ -191,8 +189,6 @@ if [ -d "/var/tmp" ]
 fi
 
 fileSyncLog="${tmpDir}/sync.log"
-localFileList="${tmpDir}/sync.localFileList.log"
-sdCardFileList="${tmpDir}/sync.sdCardFileList.log"
 
 # Check if the ezshare-cli command is available
 # If not install it via pip if python is installed
@@ -252,49 +248,6 @@ if [ ${attempt} -eq 5 ]
   exit 1
 fi
 
-echo
-echo "Starting SD card sync at `date`"
-echo
-
-# Generate a list of directories that are already present on the
-# local system.
-find ${sdCardDir}/DATALOG -mindepth 1 -maxdepth 1 -type d -name "20*" | awk -F '/' '{print $NF}' | sort -n | uniq >${localFileList}
-
-ezShareSyncInProgress=1
-
-# Get a list of directories in the DATALOG directory on the SD Card
-# only sync the directories that are missing from the local system
-# An arbitrary sleep value was also added because it sometimes takes
-# a few seconds before the web interface can be accessed.
-sleep 5
-curl -s "http://192.168.4.1/dir?dir=DATALOG" | tee ${sdCardFileList}
-touch ${fileSyncLog}
-for dir in `cat ${sdCardFileList} | grep "DATALOG%5C20" | cut -f2 -d '"' | sed -e 's/dir\?dir=DATALOG%5C//' | sort -n | uniq`
-  do
-  echo "Checking ${dir}..."
-  # If the directory exists on the sd card, but not in
-  # the localFileList, we need to sync it to the local
-  # filesystem
-  if [ -z "`grep -o \"${dir}\" ${localFileList}`" ]
-    then
-    mkdir -vp ${sdCardDir}/DATALOG/${dir}
-    echo "Connecting to ezshare card to sync DATALOG/${dir} to ${sdCardDir}/DATALOG/${dir}..."
-    i=0
-    while [ ${i} -lt 5 ]
-      do
-      echo "Connecting to ezshare card to sync /${remoteTargetFile} to ${target}..."
-      ${ezShareCLICmd} -w -d DATALOG/${dir} -t ${sdCardDir}/DATALOG/${dir} 2>&1 | tee -a ${fileSyncLog}
-      if [ $? -eq 0 ]
-        then
-        break # Break the loop if we've sync'd the file otherwise try again...
-      fi
-      sleep 5
-      ((i+=1))
-    done
-  fi
-done
-ezShareSyncInProgress=0
-
 # Added to fix a bug in ezshare CLI which only adds files that have changed in size
 # this meant that minor changes to settings were not be captured.
 for target in ${fileList}
@@ -314,21 +267,28 @@ for target in ${fileList}
   if [ -d ${absTarget} ]
     then
     rm -rf ${absTarget}
-    mkdir -p ${absTarget}
   fi
-  i=0
-  while [ ${i} -lt 5 ]
-    do
-    echo "Connecting to ezshare card to sync /${remoteTargetFile} to ${target}..."
-    ${ezShareCLICmd} -w -d /${remoteTargetFile} -t ${absTarget} 2>&1 | tee -a ${fileSyncLog}
-    if [ $? -eq 0 ]
-      then
-      break # Break the loop if we've sync'd the file otherwise try again...
-    fi
-    sleep 5
-    ((i+=1))
-  done
 done
+
+echo
+echo "Starting SD card sync at `date`"
+echo
+
+ezShareSyncInProgress=1
+touch ${fileSyncLog}
+i=0
+while [ ${i} -lt 5 ]
+  do
+  echo "Connecting to ezshare card to SD card contents to ${sdCardDir}/"
+  ${ezShareCLICmd} -w -r -d / -t ${sdCardDir}/ 2>&1 | tee ${fileSyncLog}
+  if [ $? -eq 0 ]
+    then
+    break # Break the loop if we've sync'd the file otherwise try again...
+  fi
+  sleep 5 # Try again in 5 seconds
+  ((i+=1))
+done
+ezShareSyncInProgress=0
 
 echo
 echo "SD card sync complete at `date`"
