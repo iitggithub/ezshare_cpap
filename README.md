@@ -13,9 +13,9 @@ The script will automatically update itself when new features are added so you d
 # Installation Pre-requisites
 
 - A mac. Because the script only works on a mac
-- Python3 installed on your mac
+- Python3 installed on your mac (not the version installed via Xcode developer tools)
 
-The ezshare-cli is built to work with Pytho 3. This guide doesn't go into installing Python 3 but you can download the macOS 64-bit universal2 installer for the latest stable version of Python3 from here: https://www.python.org/downloads/macos/ or you can try the homebrew method here: https://docs.python-guide.org/starting/install3/osx/
+The ezshare-cli is built to work with Python 3. This guide doesn't go into installing Python 3 but you can download the macOS 64-bit universal2 installer for the latest stable version of Python3 from here: https://www.python.org/downloads/macos/ or you can try the homebrew method here: https://docs.python-guide.org/starting/install3/osx/
 
 ### How do i know if i have python installed?
 
@@ -26,6 +26,12 @@ python3 -V
 ```
 
 If you receive an error saying that the command was not found, you probably don't have python installed or it's not configured properly.
+
+### Why do i need to install the official version of Python 3 when Mac already provides Python 3?
+
+Because of incompatibilities between the Apple-provided version which really is designed for system use rather than use by external parties like you and me. If you want to read more information on the matter, see this topic which explains it in more detail:
+
+https://github.com/urllib3/urllib3/issues/3020
 
 # Installation
 
@@ -53,6 +59,12 @@ That's it. The script is ready to use. The script will install the ezshare CLI a
 
 # Frequently Asked Questions
 
+### How do i enabla automatic uploads to Sleep HQ?
+
+If you've got an older version of the script, it will automatically update to version 9 which includes the functionality required interact with Sleep HQ. You'll need your Client UID and Client Secret in order to begin. These are generated in the Account Settings page of Sleep HQ.
+
+If you choose not to enable Sleep HQ uploads, it won't ask you again nor will it create an upload.zip file containing the files that have changed.
+
 ### My script isn't automatically updating itself
 
 Either there's no update available or you're probably running the original version of the script which didn't include the automatic update feature. Simply re-install the script to obtain the latest version which includes this feature.
@@ -65,15 +77,45 @@ I don't know... does it?
 
 The only machine i've tested it with is the Airsense 10.
 
-### Help! I entered the wrong WiFi credentials!
+### I get an AttributeError when trying to sync files
 
-No problem. Open the Keychain application on your mac and search for ezshare. It will return up to 4 entries all named ezShare.
+If you're seeing an error ending with something like this:
 
-You'll need to double click on each one to see the Account field. The four fields are described below:
+```
+...
+    for k,v in dirlist.items():
+               ^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'items'
+```
 
-- ezShareWifiSSID
-- ezShareWiFiPassword
-- homeWiFiSSID
-- homeWiFiPassword
+It's an issue with the files on the SD Card. Remove the SD Card from the machine and insert it into your computer. Create a blank file in the root directory of the SD card called "ezshare.cfg" (without quotes). Reinsert the SD card into the machine and try again.
 
-Delete the entry or entries which are incorrect and run the script again. It will prompt you to re-enter those details again.
+The ezshare-cli command assumes that a directory will contain links to '.', '..', or 'ezshare.cfg' which is how it determines if it's in a valid directory. Since . and .. are only present in sub directories, this error usually only occurs in the root directory. Because of this, creating the ezshare.cfg file in the root directory is the only known workaround at present.
+
+### Help! I entered the wrong credentials
+
+You can run the commands below to remove specific entries in the keychain. When you next run the script, it will prompt you for that information again.
+
+#### Remove the EZ Share Wifi credentials from your keychain
+
+```
+./sync.sh --remove-ezshare
+```
+
+#### Remove the home Wifi credentials from your keychain
+
+```
+./sync.sh --remove-home
+```
+
+#### Remove Sleep HQ credentials and the device ID from your keychain
+
+```
+./sync.sh --remove-sleephq
+```
+
+#### Do all of the above ^
+
+```
+./sync.sh --remove-all
+```
