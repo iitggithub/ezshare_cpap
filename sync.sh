@@ -1,12 +1,9 @@
 #! /bin/bash -e
-# VERSION=9
+# VERSION=10
 #
 # Change log:
 #
-# - Added support for Sleep HQ automated uploads
-# - Added command line parameters to remove keychain entries
-# - Fixed check for python 3 installation
-# - Various bug fixes, error checking and quality of life improvements
+# - Added Airsense 11 specific changes to hopefully make it compatible
 #
 # Script to sync data from an Ez Share WiFi SD card
 # to a folder called "SD_Card" on the local users desktop.
@@ -585,6 +582,12 @@ if [ -n "${firstDir}" ]
     echo -e "\nCreating upload.zip file..."
     cd "${sdCardDir}"
     test -f "${uploadZipFile}" && rm -f "${uploadZipFile}"
+
+    # Airsense 11? specific changes
+    # STR.edf is named STR.EDF which is not compatible with Sleep HQ.
+    # Rename STR.EDF to STR.edf.
+    mv ${sdCardDir}/STR.EDF ${sdCardDir}/STR.edf
+
     zip -r "${uploadZipFile}" ${fileList} && echo -e "\nCreated ${uploadZipFile} file in ${sdCardDir} which includes dates ${firstDir} to ${lastDir}."
 
     # Don't bother continuing if the zip file hasn't been created.
