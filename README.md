@@ -14,6 +14,7 @@ The script will automatically update itself when new features are added so you d
 
 - A mac. Because the script only works on a mac
 - Python3 installed on your mac (not the version installed via Xcode developer tools)
+- Perform an initial sync
 
 The ezshare-cli is built to work with Python 3. This guide doesn't go into installing Python 3 but you can download the macOS 64-bit universal2 installer for the latest stable version of Python3 from here: https://www.python.org/downloads/macos/ or you can try the homebrew method here: https://docs.python-guide.org/starting/install3/osx/
 
@@ -32,6 +33,19 @@ If you receive an error saying that the command was not found, you probably don'
 Because of incompatibilities between the Apple-provided version which really is designed for system use rather than use by external parties like you and me. If you want to read more information on the matter, see this topic which explains it in more detail:
 
 https://github.com/urllib3/urllib3/issues/3020
+
+### Performing an initial sync
+
+If you've got a lot of data on your SD card already, I'd recommend the following steps because downloading all of your sleep data via the ezshare utility will be painfully slow.
+
+1. Remove the SD Card from your CPAP device
+2. Connect it to your computer
+3. Create a folder on your desktop called SD_Card
+4. Copy the contents of your SD Card into the newly created folder
+5. Place the SD card back into your CPAP device
+6. If you haven't already manually uploaded your data to Sleep HQ, you can do it now.
+
+When you run the script tomorrow morning it'll only upload that days worth of data so the script will complete in a couple of minutes.
 
 # Installation
 
