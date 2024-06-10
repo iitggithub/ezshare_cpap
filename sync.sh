@@ -1,5 +1,5 @@
 #! /bin/bash -e
-# VERSION=10
+# VERSION=11
 #
 # Change log:
 #
@@ -599,7 +599,7 @@ if [ -n "${firstDir}" ]
       echo
       exit 1
     fi
-
+    trap - INT TERM EXIT # Disable trapping because API errors will cause the script to terminate prematurel with no explanation.
     if [ -z "${sleepHQAccessToken}" ]
       then
       # Login
