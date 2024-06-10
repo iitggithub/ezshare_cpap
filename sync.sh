@@ -1,9 +1,9 @@
-#! /bin/bash -e
-# VERSION=11
+#! /bin/bash
+# VERSION=12
 #
 # Change log:
 #
-# - Added Airsense 11 specific changes to hopefully make it compatible
+# - Disabled INT TERM EXIT trapping during sleep HQ API calls as some errors are expected and handled and disabled /bin/bash -e
 #
 # Script to sync data from an Ez Share WiFi SD card
 # to a folder called "SD_Card" on the local users desktop.
