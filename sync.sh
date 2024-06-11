@@ -1,9 +1,9 @@
 #! /bin/bash
-# VERSION=12
+# VERSION=13
 #
 # Change log:
 #
-# - Disabled INT TERM EXIT trapping during sleep HQ API calls as some errors are expected and handled and disabled /bin/bash -e
+# - Fixed a condition where the device ID could be removed from the keychain but the script still tries to continue anyway
 #
 # Script to sync data from an Ez Share WiFi SD card
 # to a folder called "SD_Card" on the local users desktop.
@@ -325,7 +325,8 @@ sleepHQDeviceID="`security find-generic-password -ga "sleepHQDeviceID" 2>&1 | gr
 # it's assumed that they've never been asked to create them
 # Explicitly saying "n" will permanently disable this check.
 if [ -z "${sleepHQClientUID}" ] ||
-   [ -z "${sleepHQClientSecret}" ]
+   [ -z "${sleepHQClientSecret}" ] ||
+   [ -z "${sleepHQDeviceID}" ]
   then
   echo -n "Would you like to enable automatic uploads to SleepHQ? (y/n): "
   read -r answer
