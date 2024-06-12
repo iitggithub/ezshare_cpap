@@ -1,9 +1,10 @@
 #! /bin/bash
-# VERSION=13
+# VERSION=14
 #
 # Change log:
 #
-# - Fixed a condition where the device ID could be removed from the keychain but the script still tries to continue anyway
+# - Added support for uploading O2 Ring csv files
+# - Added ability to skip some actions ie --skip-sync, and --skip-o2
 #
 # Script to sync data from an Ez Share WiFi SD card
 # to a folder called "SD_Card" on the local users desktop.
@@ -25,9 +26,15 @@ if [ "`id -u`" -eq 0 ]
   exit 1
 fi
 
+# GLOBAL VARIABLES
+sdCardDir="/Users/`whoami`/Desktop/SD_Card" # The location where SD card files will be synchronised
+uploadZipFileName="upload.zip" # The name of the zip file which will be uploaded to Sleep HQ
+uploadZipFile="${sdCardDir}/${uploadZipFileName}" # The absolute path to the Zip file containing files needing to be uploaded
 ezShareSyncInProgress=0 # Added to allow the removal of partially sync'd directories
 sleepHQuploadsEnabled=false # Determines whether to upload data to Sleep HQ
 sleepHQAPIBaseURL="https://sleephq.com" # The base URL for the Sleep HQ API
+sleepDataSyncEnabled=true # Pulls data from SD Card and optionally pushes it to Sleep HQ
+o2RingSyncEnabled=true # Scans the ${sdCardDir} for O2 Ring CSV export files and uploads them to Sleep HQ
 
 # Uses output from the security command to provide
 # more context as to the result of actions against
@@ -58,7 +65,7 @@ waitForConnectivity() {
   local failCount=0
   while [ -z "`dig +short ${target} 2>/dev/null`" ]
     do
-    sleep 5
+    sleep 2
     if [ ${failCount} -gt 12 ]
       then
       echo "Failed connectivity check to ${target}."
@@ -72,61 +79,80 @@ waitForConnectivity() {
 }
 
 # Iterate over command line arguments
-case "${@}" in
-  "--remove-sleephq")
-    output="`security -q delete-generic-password -a sleepHQClientUID 2>&1`"
-    verifyKeychainAction delete sleepHQClientUID $? "${output}"
-    output="`security -q delete-generic-password -a sleepHQClientSecret 2>&1`"
-    verifyKeychainAction delete sleepHQClientSecret $? "${output}"
-    output="`security -q delete-generic-password -a sleepHQDeviceID 2>&1`"
-    verifyKeychainAction delete sleepHQDeviceID $? "${output}"
-    echo
+for arg in ${@}
+  do
+  case "${arg}" in
+    "--skip-sync")
+    sleepDataSyncEnabled=false
+    ;;
+    "--skip-o2")
+    o2RingSyncEnabled=false
+    ;;
+    "--remove-sleephq")
+      output="`security -q delete-generic-password -a sleepHQClientUID 2>&1`"
+      verifyKeychainAction delete sleepHQClientUID $? "${output}"
+      output="`security -q delete-generic-password -a sleepHQClientSecret 2>&1`"
+      verifyKeychainAction delete sleepHQClientSecret $? "${output}"
+      output="`security -q delete-generic-password -a sleepHQDeviceID 2>&1`"
+      verifyKeychainAction delete sleepHQDeviceID $? "${output}"
+      echo
+      exit 0
+    ;;
+    "--remove-ezshare")
+      output="`security -q delete-generic-password -a ezShareWifiSSID 2>&1`"
+      verifyKeychainAction delete ezShareWifiSSID $? "${output}"
+      output="`security -q delete-generic-password -a ezShareWiFiPassword 2>&1`"
+      verifyKeychainAction delete ezShareWiFiPassword $? "${output}"
+      echo
+      exit 0
+    ;;
+    "--remove-home")
+      output="`security -q delete-generic-password -a homeWiFiSSID 2>&1`"
+      verifyKeychainAction delete homeWiFiSSID $? "${output}"
+      output="`security -q delete-generic-password -a homeWiFiPassword 2>&1`"
+      verifyKeychainAction delete homeWiFiPassword $? "${output}"
+      echo
+      exit 0
+    ;;
+    "--remove-all")
+      bash "${0}" --remove-sleephq
+      bash "${0}" --remove-ezshare
+      bash "${0}" --remove-home
+      exit 0
+    ;;
+    "-v"|"--version")
+    echo "sync.sh version $(grep '^# VERSION=' "$0" 2>/dev/null | cut -f2 -d '=')"
+    ;;
+    "--connection-check")
+    open -a safari https://youtu.be/dQw4w9WgXcQ?si=ciWPSSKqphW4gkvz
     exit 0
-  ;;
-  "--remove-ezshare")
-    output="`security -q delete-generic-password -a ezShareWifiSSID 2>&1`"
-    verifyKeychainAction delete ezShareWifiSSID $? "${output}"
-    output="`security -q delete-generic-password -a ezShareWiFiPassword 2>&1`"
-    verifyKeychainAction delete ezShareWiFiPassword $? "${output}"
-    echo
-    exit 0
-  ;;
-  "--remove-home")
-    output="`security -q delete-generic-password -a homeWiFiSSID 2>&1`"
-    verifyKeychainAction delete homeWiFiSSID $? "${output}"
-    output="`security -q delete-generic-password -a homeWiFiPassword 2>&1`"
-    verifyKeychainAction delete homeWiFiPassword $? "${output}"
-    echo
-    exit 0
-  ;;
-  "--remove-all")
-    bash "${0}" --remove-sleephq
-    bash "${0}" --remove-ezshare
-    bash "${0}" --remove-home
-    exit 0
-  ;;
-  "-v"|"--version")
-  echo "sync.sh version $(grep '^# VERSION=' "$0" 2>/dev/null | cut -f2 -d '=')"
-  ;;
-  "-h"|"--help")
-    echo "sync.sh <options>"
-    echo
-    echo "Options:"
-    echo
-    echo "Remove Sleep HQ credentials from your keychain:"
-    echo "${0} --remove-sleephq"
-    echo
-    echo "Remove Ezshare WiFi SD card WiFi SSID and password from your keychain:"
-    echo "${0} --remove-ezshare"
-    echo
-    echo "Remove home WiFi credentials from your keychain:"
-    echo "${0} --remove-home"
-    echo
-    echo "Remove all of the above:"
-    echo "${0} --remove-all"
-    exit 0
-  ;;
-esac
+    ;;
+    "-h"|"--help")
+      echo "sync.sh <options>"
+      echo
+      echo "Options:"
+      echo
+      echo "Don't sync files from the SD Card or upload to Sleep HQ:"
+      echo "${0} --skip-sync"
+      echo
+      echo "Don't sync O2 CSV export files to Sleep HQ:"
+      echo "${0} --skip-o2"
+      echo
+      echo "Remove Sleep HQ credentials from your keychain:"
+      echo "${0} --remove-sleephq"
+      echo
+      echo "Remove Ezshare WiFi SD card WiFi SSID and password from your keychain:"
+      echo "${0} --remove-ezshare"
+      echo
+      echo "Remove home WiFi credentials from your keychain:"
+      echo "${0} --remove-home"
+      echo
+      echo "Remove all of the above:"
+      echo "${0} --remove-all"
+      exit 0
+    ;;
+  esac
+done
 
 # Exit function which makes sure we clean up
 # after ourselves and reconnect to the home WiFi
@@ -196,45 +222,227 @@ version_check() {
 }
 version_check
 
-# Check if Python 3 is installed and not the
-# one that comes with Xcode developer tools
-case "`which python3`" in
-  ""|/usr/bin/python3)
-    echo "Python 3 doesn't seem to be installed correctly on your mac."
-    echo "Please install python 3 on your mac, and then try again."
+createUploadFile() {
+  echo -e "\nCreating upload.zip file..."
+    cd "${sdCardDir}"
+    test -f "${uploadZipFile}" && rm -f "${uploadZipFile}"
+
+    if [ -n "${fileList}" ]
+      then
+      # Airsense 11? specific changes
+      # STR.edf is named STR.EDF which is not compatible with Sleep HQ.
+      # Rename STR.EDF to STR.edf.
+      mv ${sdCardDir}/STR.EDF ${sdCardDir}/STR.edf
+
+      zip -r "${uploadZipFile}" ${fileList} && echo -e "\nCreated ${uploadZipFile} file in ${sdCardDir} which includes dates ${firstDir} to ${lastDir}."
+      else
+      rm -f "${uploadZipFile}"
+      find "${sdCardDir}" -mindepth 1 -maxdepth 1 -type f -name "O2Ring*.csv" -print0 | xargs -0 -n 1 zip -r ${uploadZipFile}
+      if [ -s "${uploadZipFile}" ]
+        then
+        echo -e "\nCreated ${uploadZipFile} file in ${sdCardDir}..."
+        find "${sdCardDir}" -mindepth 1 -maxdepth 1 -type f -name "O2Ring*.csv" -print0 | xargs -0 -n 1 rm -f
+      fi
+    fi
+    # Don't bother continuing if the zip file hasn't been created.
+    if [ ! -f "${uploadZipFile}" ]
+      then
+      echo
+      echo "Failed to create ${uploadZipFile} file in ${sdCardDir}."
+      echo "Cannot continue with automatic upload. Please upload your data manually."
+      echo
+      exit 1
+    fi
+}
+
+generateAccessToken() {
+  # Login
+  sleepHQLoginURL="${sleepHQAPIBaseURL}/oauth/token?"
+  sleepHQLoginURL="${sleepHQLoginURL}client_id=${sleepHQClientUID}"
+  sleepHQLoginURL="${sleepHQLoginURL}&client_secret=${sleepHQClientSecret}"
+  sleepHQLoginURL="${sleepHQLoginURL}&grant_type=password"
+  sleepHQLoginURL="${sleepHQLoginURL}&scope=read%20write"
+
+  # Get the access token which is needed to upload the files
+  echo
+  echo "Connecting to Sleep HQ..."
+  sleepHQAccessToken="`curl -s -X 'POST' "${sleepHQLoginURL}" 2>/dev/null | ${python3cmd} -c "import json;import sys;print(json.load(sys.stdin)['access_token'])" 2>/dev/null`"
+
+
+  # Make sure we've got an access token.
+  # If we've got an empty value for the ${sleepHQAccessToken}
+  # we've failed to get one and can't continue
+  if [ -z "${sleepHQAccessToken}" ]
+    then
     echo
-    echo "Visit https://www.python.org/downloads/macos/ to download the latest version"
-    echo "Follow the instructions to install python 3 before restarting your computer"
-    echo "and executing the script again."
+    echo "Failed to obtain a Sleep HQ API Access Token."
+    echo "Make sure your Client UID and Secret are correct and"
+    echo "you can access the https://sleephq.com website in your"
+    echo "web browser."
     echo
-    echo "If you've just installed Python 3, try restarting your computer and try again."
+    echo "Debug output for troubleshooting is shownn below: "
     echo
+    echo "Command:"
+    echo "curl -X 'POST' \"${sleepHQLoginURL}\""
+    echo
+    echo -n "Output: "
+    curl -X 'POST' "${sleepHQLoginURL}"
+    echo
+    echo
+    echo "Cannot continue with upload... exiting now..."
     exit 1
-  ;;
-  *)
-  python3cmd="`which python3`"
-  ;;
-esac
+  fi
+}
 
-# Check if the ezshare-cli command is available
-# If not install it via pip if python is installed
-# If python isn't installed, tell the user to go install it
-if [ -z "`which ezshare-cli`" ]
-  then
-  echo "Can't find ezshare-cli utility."
-  echo "Installing ezshare-cli via pip.."
+getTeamID() {
+  # Get the team ID
   echo
-  pip3 install ezshare || exit
-  ezShareCLICmd="`which ezshare-cli`"
-  echo
-  else
-  ezShareCLICmd="`which ezshare-cli`" 
-fi
+  echo "Obtaining Sleep HQ Team ID..."
+  sleepHQTeamID="`curl -s -X 'GET' "${sleepHQAPIBaseURL}/api/v1/me" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}" 2>/dev/null | ${python3cmd} -c "import json;import sys;print(json.load(sys.stdin)['data']['current_team_id'])" 2>/dev/null`"
 
-# The location where SD card files will be synchronised:
-sdCardDir="/Users/`whoami`/Desktop/SD_Card"
-uploadZipFileName="upload.zip"
-uploadZipFile="${sdCardDir}/${uploadZipFileName}" # Zip file containing files needing to be uploaded
+  # Team ID is expected to be a number. If it's not something went wrong.
+  if ! [[ ${sleepHQTeamID} =~ ^[0-9]+$ ]]
+    then
+    echo
+    echo "Failed to obtain your Sleep HQ Team ID. Debug output for troubleshooting is shownn below: "
+    echo
+    echo "Command:"
+    echo "curl -X 'GET' \"${sleepHQAPIBaseURL}/api/v1/me\" -H 'accept: application/vnd.api+json' -H \"authorization: Bearer ${sleepHQAccessToken}\""
+    echo
+    echo -n "Output: "
+    curl -X 'GET' "${sleepHQAPIBaseURL}/api/v1/me" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}"
+    echo
+    echo "Cannot continue with upload... exiting now..."
+    exit 1
+  fi
+}
+
+createImportTask() {
+  # Create an Import task  
+  echo
+  echo "Creating Data Import task..."
+  sleepHQImportTaskURL="${sleepHQAPIBaseURL}/api/v1/teams/${sleepHQTeamID}/imports?"
+  sleepHQImportTaskURL="${sleepHQImportTaskURL}team_id=${sleepHQTeamID}&"
+  sleepHQImportTaskURL="${sleepHQImportTaskURL}programatic=true&"
+  sleepHQImportTaskURL="${sleepHQImportTaskURL}device_id=${sleepHQDeviceID}"
+  sleepHQImportTaskID="`curl -s -X 'POST' "${sleepHQImportTaskURL}" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}" 2>/dev/null | ${python3cmd} -c "import json;import sys;print(json.load(sys.stdin)['data']['attributes']['id'])" 2>/dev/null`"
+
+  # Import Task ID is expected to be a number. If it's not something went wrong.
+  if ! [[ ${sleepHQImportTaskID} =~ ^[0-9]+$ ]]
+    then
+    echo
+    echo "Failed to generate an Import Task ID. Debug output for troubleshooting is shownn below: "
+    echo
+    echo "Command:"
+    echo "curl -X 'POST' \"${sleepHQImportTaskURL}\" -H 'accept: application/vnd.api+json' -H \"authorization: Bearer ${sleepHQAccessToken}\""
+    echo
+    echo -n "Output: "
+    curl -X 'POST' "${sleepHQImportTaskURL}" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}"
+    echo
+    echo
+    echo "Cannot continue with upload... exiting now..."
+    exit 1
+  fi
+}
+
+generateContentHash() {
+  # Generate content hash
+  # Takes the contents of the file to be uploaded and appends "upload.zip"
+  # which is the name of the file being uploaded to the end of the string.
+  # Finally it performs an md5sum of the entire string
+  sleepHQcontentHash="`(cat ${uploadZipFileName} ; echo "${uploadZipFileName}") | md5 -q`"
+}
+
+uploadFileToSleepHQ() {
+  # Upload Zip file to Sleep HQ
+  sleepHQImportFileURL="${sleepHQAPIBaseURL}/api/v1/imports/${sleepHQImportTaskID}/files?"
+  sleepHQImportFileURL="${sleepHQImportFileURL}import_id=${sleepHQImportTaskID}&"
+  sleepHQImportFileURL="${sleepHQImportFileURL}name=${uploadZipFileName}&"
+  sleepHQImportFileURL="${sleepHQImportFileURL}path=.%2F&"
+  sleepHQImportFileURL="${sleepHQImportFileURL}content_hash=${sleepHQcontentHash}"
+  echo
+  echo "Uploading ${uploadZipFileName} to Sleep HQ..."
+  curl -s -X 'POST' "${sleepHQImportFileURL}" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}" -F "file=@${uploadZipFileName}" >/dev/null
+}
+
+triggerDataImport() {
+  # Instruct Sleep HQ to unpack the zip file and process the import
+  echo
+  echo "Beginning Data Import processing of ${uploadZipFileName} for Import Task ID ${sleepHQImportTaskID}..."
+  curl -s -X 'POST' "${sleepHQAPIBaseURL}/api/v1/imports/${sleepHQImportTaskID}/process_files?id=${sleepHQImportTaskID}" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}" >/dev/null
+}
+
+monitorImportProgress() {
+  # wait for upload to complete
+  progress=0
+  prevProgress=0
+  failCounter=0
+  while [ "${progress}" -lt 100 ]
+    do
+    if [ "${progress}" -ne 0 ]
+      then
+      sleep 5 # Add a 5 second sleep timer to avoid API throttling
+    fi
+    progress="`curl -s -X 'GET' "https://sleephq.com/api/v1/imports/${sleepHQImportTaskID}" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}" 2>/dev/null | ${python3cmd} -c "import json;import sys;print(json.load(sys.stdin)['data']['attributes']['progress'])"`"
+    echo -ne "Progress: ${progress}% complete...\r"
+    if [ ${prevProgress} -eq "${progress}" ]
+      then
+      if [ ${failCounter} -eq 12 ]
+        then
+        echo
+        echo "Upload progress is still at ${progress}% after 60 seconds."
+        echo
+        echo "Abandoning monitoring of Data Import. Please check the Data Import page"
+        echo "on the Sleep HQ website."
+        break
+      fi
+      ((failCounter++))
+      else
+      failCounter=0
+      prevProgress="${progress}"
+    fi
+  done
+  echo -ne '\n'
+}
+
+checkPythonConfiguration() {
+  # Check if Python 3 is installed and not the
+  # one that comes with Xcode developer tools
+  case "`which python3`" in
+    ""|/usr/bin/python3)
+      echo "Python 3 doesn't seem to be installed correctly on your mac."
+      echo "Please install python 3 on your mac, and then try again."
+      echo
+      echo "Visit https://www.python.org/downloads/macos/ to download the latest version"
+      echo "Follow the instructions to install python 3 before restarting your computer"
+      echo "and executing the script again."
+      echo
+      echo "If you've just installed Python 3, try restarting your computer and try again."
+      echo
+      exit 1
+    ;;
+    *)
+    python3cmd="`which python3`"
+    ;;
+  esac
+
+  # Check if the ezshare-cli command is available
+  # If not install it via pip if python is installed
+  # If python isn't installed, tell the user to go install it
+  if [ -z "`which ezshare-cli`" ]
+    then
+    echo "Can't find ezshare-cli utility."
+    echo "Installing ezshare-cli via pip.."
+    echo
+    pip3 install ezshare || exit
+    ezShareCLICmd="`which ezshare-cli`"
+    echo
+    else
+    ezShareCLICmd="`which ezshare-cli`" 
+  fi
+}
+
+checkPythonConfiguration
 
 # Create the SD card directory if it doesn't exist
 if [ ! -d "${sdCardDir}" ]
@@ -242,13 +450,6 @@ if [ ! -d "${sdCardDir}" ]
   echo "SD Card directory does not exist. Creating..."
   mkdir "${sdCardDir}"
 fi
-
-# Default list of files to always include in upload zip file
-fileList="Identification.crc"
-fileList="${fileList} Identification.tgt"
-fileList="${fileList} Journal.dat"
-fileList="${fileList} SETTINGS"
-fileList="${fileList} STR.edf"
 
 # Get the WiFi adaptor name. If there's multiple it
 # will choose the first one in the list. Typically
@@ -312,10 +513,6 @@ if [ -z "${ezShareWifiSSID}" ] ||
   security add-generic-password -T "/usr/bin/security" -U -a "homeWiFiPassword" -s "ezShare" -w "${homeWiFiPassword}"
 fi
 
-# Determines whether to upload data to Sleep HQ
-sleepHQuploadsEnabled=false
-sleepHQAPIBaseURL="https://sleephq.com"
-
 # Sleep HQ Upload Credentials
 sleepHQClientUID="`security find-generic-password -ga "sleepHQClientUID" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//'`"
 sleepHQClientSecret="`security find-generic-password -ga "sleepHQClientSecret" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//'`"
@@ -360,15 +557,11 @@ if [ -z "${sleepHQClientUID}" ] ||
 
         echo
         echo -n "Testing Sleep HQ API Credentials... "
-        sleepHQLoginURL="${sleepHQAPIBaseURL}/oauth/token?"
-        sleepHQLoginURL="${sleepHQLoginURL}client_id=${sleepHQClientUID}"
-        sleepHQLoginURL="${sleepHQLoginURL}&client_secret=${sleepHQClientSecret}"
-        sleepHQLoginURL="${sleepHQLoginURL}&grant_type=password"
-        sleepHQLoginURL="${sleepHQLoginURL}&scope=read%20write"
-
-        # Get the access token which is needed to upload the files
-        sleepHQAccessToken="`curl -s -X 'POST' "${sleepHQLoginURL}" 2>/dev/null | ${python3cmd} -c "import json;import sys;print(json.load(sys.stdin)['access_token'])" 2>/dev/null`"
-
+        if [ -z "${sleepHQAccessToken}" ]
+          then
+          generateAccessToken
+        fi
+        
         # Make sure we've got an access token.
         # If we've got an empty value for the ${sleepHQAccessToken}
         # we've failed to get one and can't continue
@@ -445,314 +638,215 @@ if [ "${sleepHQClientUID}" != "false" ] &&
   sleepHQuploadsEnabled=true
 fi
 
-# Make sure we can connect to the home WiFi network
-# because there's not much point in continuing if the
-# the user hasn't got their own WiFi details set correctly
-echo
-echo -n "Checking WiFi connectivity to ${homeWiFiSSID}... "
-if [ -n "`networksetup -setairportnetwork "${wifiAdaptor}" \"${homeWiFiSSID}\" \"${homeWiFiPassword}\" 2>/dev/null`" ]
+if ${sleepDataSyncEnabled}
   then
-  echo -e "\n\nFailed to connect to the WiFi network '${homeWiFiSSID}'."
-  echo "Continuing will potentially leave you unable to connect to your"
-  echo "home WiFi network. Please make sure your homeWiFiSSID and homeWiFiPassword"
-  echo "are set correctly. Search for \"ezshare\" (without quotes) in your"
-  echo "Login keychain."
-  exit 1
-fi
-echo "PASS!"
-
-# Set a default path to the file sync log
-# The file is used to determine which directories
-# need to be added to the zip file
-if [ -d "/var/tmp" ]
-  then
-  tmpDir="/var/tmp"
-  else
-  tmpDir="/tmp"
-fi
-
-fileSyncLog="${tmpDir}/sync.log"
-
-trap exit_function INT TERM EXIT
-attempt=0
-while [ ${attempt} -lt 5 ]
-  do
-  echo -n "Connecting to WiFi network '${ezShareWifiSSID}'... "
-  if [ -n "`networksetup -setairportnetwork "${wifiAdaptor}" \"${ezShareWifiSSID}\" \"${ezShareWiFiPassword}\" 2>/dev/null`" ]
+  # Make sure we can connect to the home WiFi network
+  # because there's not much point in continuing if the
+  # the user hasn't got their own WiFi details set correctly
+  echo
+  echo -n "Checking WiFi connectivity to ${homeWiFiSSID}... "
+  if [ -n "`networksetup -setairportnetwork "${wifiAdaptor}" \"${homeWiFiSSID}\" \"${homeWiFiPassword}\" 2>/dev/null`" ]
     then
-    echo -e "\n\nFailed to connect to ez Share WiFi network."
-    echo
-    echo -n "Trying again in 10 seconds or press Control + C to exit"
-    i=0
-    while [ ${i} -lt 10 ]
-      do
-      echo -n "."
-      sleep 1
-      ((i+=1))
-    done
-    echo
-    echo
+    echo -e "\n\nFailed to connect to the WiFi network '${homeWiFiSSID}'."
+    echo "Continuing will potentially leave you unable to connect to your"
+    echo "home WiFi network. Please make sure your homeWiFiSSID and homeWiFiPassword"
+    echo "are set correctly. Search for \"ezshare\" (without quotes) in your"
+    echo "Login keychain."
+    exit 1
+  fi
+  echo "PASS!"
+
+  # Set a default path to the file sync log
+  # The file is used to determine which directories
+  # need to be added to the zip file
+  if [ -d "/var/tmp" ]
+    then
+    tmpDir="/var/tmp"
     else
-    echo "done!"
-    ezShareConnected=1 # Ensures we reconnect to the home wifi network if anything fails
-    break # we're connected to the WiFi network now..
+    tmpDir="/tmp"
   fi
-  ((attempt+=1))
-done
 
-# Make sure we don't continue if 5 attempts if attempts > 5
-# this means we tried and failed to connect the EzShare WiFi network
-if [ ${attempt} -eq 5 ]
-  then
-  echo -e "\n\nFailed to connect to ez Share WiFi network. Please make sure your SSID and password"
-  echo "are correct and the ez Share WiFi SD card is powered on."
-  exit 1
+  fileSyncLog="${tmpDir}/sync.log"
+
+  trap exit_function INT TERM EXIT
+  attempt=0
+  while [ ${attempt} -lt 5 ]
+    do
+    echo -n "Connecting to WiFi network '${ezShareWifiSSID}'... "
+    if [ -n "`networksetup -setairportnetwork "${wifiAdaptor}" \"${ezShareWifiSSID}\" \"${ezShareWiFiPassword}\" 2>/dev/null`" ]
+      then
+      echo -e "\n\nFailed to connect to ez Share WiFi network."
+      echo
+      echo -n "Trying again in 10 seconds or press Control + C to exit"
+      i=0
+      while [ ${i} -lt 10 ]
+        do
+        echo -n "."
+        sleep 1
+        ((i+=1))
+      done
+      echo
+      echo
+      else
+      echo "done!"
+      ezShareConnected=1 # Ensures we reconnect to the home wifi network if anything fails
+      break # we're connected to the WiFi network now..
+    fi
+    ((attempt+=1))
+  done
+
+  # Make sure we don't continue if 5 attempts if attempts > 5
+  # this means we tried and failed to connect the EzShare WiFi network
+  if [ ${attempt} -eq 5 ]
+    then
+    echo -e "\n\nFailed to connect to ez Share WiFi network. Please make sure your SSID and password"
+    echo "are correct and the ez Share WiFi SD card is powered on."
+    exit 1
+  fi
+
+  # Added to fix a bug in ezshare CLI which only adds files that have changed in size
+  # this meant that minor changes to settings were not be captured.
+  # Default list of files to always include in upload zip file
+  fileList="Identification.crc"
+  fileList="${fileList} Identification.tgt"
+  fileList="${fileList} Journal.dat"
+  fileList="${fileList} SETTINGS"
+  fileList="${fileList} STR.edf"
+  for target in ${fileList}
+    do
+    absTarget="${sdCardDir}/${target}"
+    if [[ ${absTarget} =~ ^/$ ]]
+      then
+      echo "Skipping removal of target ${absTarget}. This is almost certainly a bug"
+      echo "and should be reported here: https://github.com/iitggithub/ezshare_cpap/issues"
+      continue
+    fi
+    #remoteTargetFile="`echo ${absTarget} | awk -F '/' '{print $NF}'`"
+    if [ -f "${absTarget}" ]
+      then
+      rm -f "${absTarget}"
+    fi
+    if [ -d "${absTarget}" ]
+      then
+      rm -rf "${absTarget}"
+    fi
+  done
+
+  echo
+  echo "Starting SD card sync at `date`"
+  echo
+
+  ezShareSyncInProgress=1
+  touch ${fileSyncLog}
+  i=0
+  while [ ${i} -lt 5 ]
+    do
+    echo "Connecting to ezshare card to synchronize SD card contents to ${sdCardDir}/"
+    ${ezShareCLICmd} -w -r -d / -t "${sdCardDir}"/ 2>&1 | tee ${fileSyncLog}
+    if [ $? -eq 0 ]
+      then
+      break # Break the loop if we've sync'd the file otherwise try again...
+    fi
+    sleep 5 # Try again in 5 seconds
+    ((i+=1))
+  done
+  ezShareSyncInProgress=0
+
+  echo
+  echo "SD card sync complete at `date`"
+
+  echo
+  echo -n "Reconnecting to WiFi network '${homeWiFiSSID}'... "
+  networksetup -setairportnetwork "${wifiAdaptor}" "${homeWiFiSSID}" "${homeWiFiPassword}"
+  waitForConnectivity "`echo ${sleepHQAPIBaseURL} | sed -e 's/https:\/\///'`"
+  echo "done!"
+  ezShareConnected=0 # disables automatic reconnection to home wifi
+
+  firstDir=""
+  lastDir=""
+
+  # Add the remaining directories to the list
+  for dir in `cat ${fileSyncLog} | grep "100%" | cut -f1 -d ':' | grep DATALOG | awk -F '/' '{print $(NF -1)}' | sort | uniq`
+    do
+    if [ -z "${firstDir}" ]
+      then
+      firstDir="${dir}"
+    fi
+    fileList="${fileList} DATALOG/${dir}"
+    lastDir="${dir}"
+  done
+
+  # Create the zip file if there's data to be uploaded
+  if [ -n "${firstDir}" ]
+    then
+    if [ ${sleepHQuploadsEnabled} ]
+      then
+      createUploadFile
+      trap - INT TERM EXIT # Disable trapping because API errors will cause the script to terminate prematurely with no explanation.
+
+      if [ -z "${sleepHQAccessToken}" ]
+        then
+        generateAccessToken
+      fi
+      getTeamID
+      createImportTask  
+
+      # Start trapping exit signals so we remove the
+      # import task ID if anything goes wrong.
+      trap exit_function INT TERM EXIT
+
+      generateContentHash
+      uploadFileToSleepHQ
+      triggerDataImport
+      monitorImportProgress
+
+      # Remove exit trapping because upload has either finished or been abandoned.
+      trap - INT TERM EXIT
+      else
+      echo -e "\nSuccessfully synchronized dates from  ${firstDir} to ${lastDir}."
+    fi
+    else
+    echo -e "\nNo dates detected that needed to be synchronised."
+    echo "This usually occurs when you've already synchronised the latest"
+    echo "data from the SD card."
+  fi
 fi
 
-# Added to fix a bug in ezshare CLI which only adds files that have changed in size
-# this meant that minor changes to settings were not be captured.
-for target in ${fileList}
-  do
-  absTarget="${sdCardDir}/${target}"
-  if [[ ${absTarget} =~ ^/$ ]]
-    then
-    echo "Skipping removal of target ${absTarget}. This is almost certainly a bug"
-    echo "and should be reported here: https://github.com/iitggithub/ezshare_cpap/issues"
-    continue
-  fi
-  #remoteTargetFile="`echo ${absTarget} | awk -F '/' '{print $NF}'`"
-  if [ -f "${absTarget}" ]
-    then
-    rm -f "${absTarget}"
-  fi
-  if [ -d "${absTarget}" ]
-    then
-    rm -rf "${absTarget}"
-  fi
-done
-
-echo
-echo "Starting SD card sync at `date`"
-echo
-
-ezShareSyncInProgress=1
-touch ${fileSyncLog}
-i=0
-while [ ${i} -lt 5 ]
-  do
-  echo "Connecting to ezshare card to synchronize SD card contents to ${sdCardDir}/"
-  ${ezShareCLICmd} -w -r -d / -t "${sdCardDir}"/ 2>&1 | tee ${fileSyncLog}
-  if [ $? -eq 0 ]
-    then
-    break # Break the loop if we've sync'd the file otherwise try again...
-  fi
-  sleep 5 # Try again in 5 seconds
-  ((i+=1))
-done
-ezShareSyncInProgress=0
-
-echo
-echo "SD card sync complete at `date`"
-
-echo
-echo -n "Reconnecting to WiFi network '${homeWiFiSSID}'... "
-networksetup -setairportnetwork "${wifiAdaptor}" "${homeWiFiSSID}" "${homeWiFiPassword}"
-waitForConnectivity "`echo ${sleepHQAPIBaseURL} | sed -e 's/https:\/\///'`"
-echo "done!"
-ezShareConnected=0 # disables automatic reconnection to home wifi
-
-firstDir=""
-lastDir=""
-
-# Add the remaining directories to the list
-for dir in `cat ${fileSyncLog} | grep "100%" | cut -f1 -d ':' | grep DATALOG | awk -F '/' '{print $(NF -1)}' | sort | uniq`
-  do
-  if [ -z "${firstDir}" ]
-    then
-    firstDir="${dir}"
-  fi
-  fileList="${fileList} DATALOG/${dir}"
-  lastDir="${dir}"
-done
-
-# Create the zip file if there's data to be uploaded
-if [ -n "${firstDir}" ]
+if ${o2RingSyncEnabled}
   then
   if [ ${sleepHQuploadsEnabled} ]
     then
-    echo -e "\nCreating upload.zip file..."
-    cd "${sdCardDir}"
-    test -f "${uploadZipFile}" && rm -f "${uploadZipFile}"
-
-    # Airsense 11? specific changes
-    # STR.edf is named STR.EDF which is not compatible with Sleep HQ.
-    # Rename STR.EDF to STR.edf.
-    mv ${sdCardDir}/STR.EDF ${sdCardDir}/STR.edf
-
-    zip -r "${uploadZipFile}" ${fileList} && echo -e "\nCreated ${uploadZipFile} file in ${sdCardDir} which includes dates ${firstDir} to ${lastDir}."
-
-    # Don't bother continuing if the zip file hasn't been created.
-    if [ ! -f "${uploadZipFile}" ]
+    # Search for O2 ring files..
+    if [ -n "`find "${sdCardDir}" -mindepth 1 -maxdepth 1 -type f -name "O2Ring*.csv" 2>/dev/null`" ]
       then
       echo
-      echo "Failed to create ${uploadZipFile} file in ${sdCardDir}."
-      echo "Cannot continue with automatic upload. Please upload your data manually."
-      echo
-      exit 1
-    fi
-    trap - INT TERM EXIT # Disable trapping because API errors will cause the script to terminate prematurel with no explanation.
-    if [ -z "${sleepHQAccessToken}" ]
-      then
-      # Login
-      sleepHQLoginURL="${sleepHQAPIBaseURL}/oauth/token?"
-      sleepHQLoginURL="${sleepHQLoginURL}client_id=${sleepHQClientUID}"
-      sleepHQLoginURL="${sleepHQLoginURL}&client_secret=${sleepHQClientSecret}"
-      sleepHQLoginURL="${sleepHQLoginURL}&grant_type=password"
-      sleepHQLoginURL="${sleepHQLoginURL}&scope=read%20write"
+      echo "O2 Ring CSV files found in ${sdCardDir}. Uploading them to Sleep HQ."
+      sleepHQDeviceID="69184" # Change the device ID to the "O2 Ring"
+      fileList="" # Reset the file list
+      createUploadFile
+      trap - INT TERM EXIT # Disable trapping because API errors will cause the script to terminate prematurely with no explanation.
 
-      # Get the access token which is needed to upload the files
-      echo
-      echo "Connecting to Sleep HQ..."
-      sleepHQAccessToken="`curl -s -X 'POST' "${sleepHQLoginURL}" 2>/dev/null | ${python3cmd} -c "import json;import sys;print(json.load(sys.stdin)['access_token'])" 2>/dev/null`"
-    fi
-
-    # Make sure we've got an access token.
-    # If we've got an empty value for the ${sleepHQAccessToken}
-    # we've failed to get one and can't continue
-    if [ -z "${sleepHQAccessToken}" ]
-      then
-      echo
-      echo "Failed to obtain a Sleep HQ API Access Token."
-      echo "Make sure your Client UID and Secret are correct and"
-      echo "you can access the https://sleephq.com website in your"
-      echo "web browser."
-      echo
-      echo "Debug output for troubleshooting is shownn below: "
-      echo
-      echo "Command:"
-      echo "curl -X 'POST' \"${sleepHQLoginURL}\""
-      echo
-      echo -n "Output: "
-      curl -X 'POST' "${sleepHQLoginURL}"
-      echo
-      echo
-      echo "Cannot continue with upload... exiting now..."
-      exit 1
-    fi
-
-    # Get the team ID
-    echo
-    echo "Obtaining Sleep HQ Team ID..."
-    sleepHQTeamID="`curl -s -X 'GET' "${sleepHQAPIBaseURL}/api/v1/me" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}" 2>/dev/null | ${python3cmd} -c "import json;import sys;print(json.load(sys.stdin)['data']['current_team_id'])" 2>/dev/null`"
-
-    # Team ID is expected to be a number. If it's not something went wrong.
-    if ! [[ ${sleepHQTeamID} =~ ^[0-9]+$ ]]
-      then
-      echo
-      echo "Failed to obtain your Sleep HQ Team ID. Debug output for troubleshooting is shownn below: "
-      echo
-      echo "Command:"
-      echo "curl -X 'GET' \"${sleepHQAPIBaseURL}/api/v1/me\" -H 'accept: application/vnd.api+json' -H \"authorization: Bearer ${sleepHQAccessToken}\""
-      echo
-      echo -n "Output: "
-      curl -X 'GET' "${sleepHQAPIBaseURL}/api/v1/me" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}"
-      echo
-      echo "Cannot continue with upload... exiting now..."
-      exit 1
-    fi
-
-    # Create an Import task
-    echo
-    echo "Creating Data Import task..."
-    sleepHQImportTaskURL="${sleepHQAPIBaseURL}/api/v1/teams/${sleepHQTeamID}/imports?"
-    sleepHQImportTaskURL="${sleepHQImportTaskURL}team_id=${sleepHQTeamID}&"
-    sleepHQImportTaskURL="${sleepHQImportTaskURL}programatic=true&"
-    sleepHQImportTaskURL="${sleepHQImportTaskURL}device_id=${sleepHQDeviceID}"
-    sleepHQImportTaskID="`curl -s -X 'POST' "${sleepHQImportTaskURL}" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}" 2>/dev/null | ${python3cmd} -c "import json;import sys;print(json.load(sys.stdin)['data']['attributes']['id'])" 2>/dev/null`"
-
-    # Import Task ID is expected to be a number. If it's not something went wrong.
-    if ! [[ ${sleepHQImportTaskID} =~ ^[0-9]+$ ]]
-      then
-      echo
-      echo "Failed to generate an Import Task ID. Debug output for troubleshooting is shownn below: "
-      echo
-      echo "Command:"
-      echo "curl -X 'POST' \"${sleepHQImportTaskURL}\" -H 'accept: application/vnd.api+json' -H \"authorization: Bearer ${sleepHQAccessToken}\""
-      echo
-      echo -n "Output: "
-      curl -X 'POST' "${sleepHQImportTaskURL}" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}"
-      echo
-      echo
-      echo "Cannot continue with upload... exiting now..."
-      exit 1
-    fi
-
-    # Start trapping exit signals so we remove the
-    # import task ID if anything goes wrong.
-    trap exit_function INT TERM EXIT
-
-    # Generate content hash
-    # Takes the contents of the file to be uploaded and appends "upload.zip"
-    # which is the name of the file being uploaded to the end of the string.
-    # Finally it performs an md5sum of the entire string
-    sleepHQcontentHash="`(cat ${uploadZipFileName} ; echo "${uploadZipFileName}") | md5 -q`"
-
-    # Add zip file to import task
-    sleepHQImportFileURL="${sleepHQAPIBaseURL}/api/v1/imports/${sleepHQImportTaskID}/files?"
-    sleepHQImportFileURL="${sleepHQImportFileURL}import_id=${sleepHQImportTaskID}&"
-    sleepHQImportFileURL="${sleepHQImportFileURL}name=${uploadZipFileName}&"
-    sleepHQImportFileURL="${sleepHQImportFileURL}path=.%2F&"
-    sleepHQImportFileURL="${sleepHQImportFileURL}content_hash=${sleepHQcontentHash}"
-
-    # Import the file
-    echo
-    echo "Uploading ${uploadZipFileName} to Sleep HQ..."
-    curl -s -X 'POST' "${sleepHQImportFileURL}" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}" -F "file=@${uploadZipFileName}" >/dev/null
-
-    # process the import
-    echo
-    echo "Beginning Data Import processing of ${uploadZipFileName} for Import Task ID ${sleepHQImportTaskID}..."
-    curl -s -X 'POST' "${sleepHQAPIBaseURL}/api/v1/imports/${sleepHQImportTaskID}/process_files?id=${sleepHQImportTaskID}" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}" >/dev/null
-
-    # wait for upload to complete
-    progress=0
-    prevProgress=0
-    failCounter=0
-    while [ "${progress}" -lt 100 ]
-      do
-      if [ "${progress}" -ne 0 ]
+      if [ -z "${sleepHQAccessToken}" ]
         then
-        sleep 5 # Add a 5 second sleep timer to avoid API throttling
+        generateAccessToken
       fi
-      progress="`curl -s -X 'GET' "https://sleephq.com/api/v1/imports/${sleepHQImportTaskID}" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}" 2>/dev/null | ${python3cmd} -c "import json;import sys;print(json.load(sys.stdin)['data']['attributes']['progress'])"`"
-      echo -ne "Progress: ${progress}% complete...\r"
-      if [ ${prevProgress} -eq "${progress}" ]
+      if [ -z "${sleepHQTeamID}" ]
         then
-        if [ ${failCounter} -eq 12 ]
-          then
-          echo
-          echo "Upload progress is still at ${progress}% after 60 seconds."
-          echo
-          echo "Abandoning monitoring of Data Import. Please check the Data Import page"
-          echo "on the Sleep HQ website."
-          break
-        fi
-        ((failCounter++))
-        else
-        failCounter=0
-        prevProgress="${progress}"
+        getTeamID
       fi
-    done
-    echo -ne '\n'
-    # Remove exit trapping because upload has either finished or been abandoned.
-    trap - INT TERM EXIT
-    else
-    echo -e "\nSuccessfully synchronized dates from  ${firstDir} to ${lastDir}."
+      createImportTask
+
+      # Start trapping exit signals so we remove the
+      # import task ID if anything goes wrong.
+      trap exit_function INT TERM EXIT
+
+      generateContentHash
+      uploadFileToSleepHQ
+      triggerDataImport
+      monitorImportProgress
+      trap - INT TERM EXIT
+    fi
   fi
-  else
-  echo -e "\nNo dates detected that needed to be synchronised."
-  echo "This usually occurs when you've already synchronised the latest"
-  echo "data from the SD card."
 fi
 
 echo

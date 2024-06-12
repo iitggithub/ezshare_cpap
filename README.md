@@ -1,6 +1,8 @@
 # ezshare_cpap
 
-Mac OSX script to pull CPAP Data from an Airsense 10 to a local machine for upload to SleepHQ. It might work with the Airsense 11 as well but I haven't tested it. Presumably if the directory structure and files are the same on the Airsense 11, it'll work no problem.
+Mac OSX script to pull CPAP Data from an Airsense 10 to a local machine for review via Oscar, upload to SleepHQ. The script also uploads O2 Ring CSV export files to Sleep HQ as well which is handy if you have a lot of files to upload.
+
+It might work with the Airsense 11 as well but I haven't tested it. Presumably if the directory structure and files are the same on the Airsense 11, it'll work no problem.
 
 The script connects to the EZ Share WiFi SD card and synchronizes the data to a folder on your desktop called SD\_Card.
 
@@ -72,6 +74,25 @@ That's it. The script is ready to use. The script will install the ezshare CLI a
 ```
 
 # Frequently Asked Questions
+
+### How do i upload O2 ring data to sleep HQ?
+
+Once you've synchronized your O2 data to your phone in the ViHealth Android app, you need to perform the following steps for each entry you would like to export in your History.
+
+1. Under History, choose the entry you'd like to export to bring up your Oxygen Level, Pulse Rate and Motion information for that session.
+2. In the top-right corner of the app, tap the button to share the data.
+3. For Format, choose CSV.
+4. Choose Share.
+5. Save the file somewhere and download it to your computer.
+6. Move the file into the SD_Card directory on the Desktop of your mac. If this folder does not exist, create it.
+7. Repeat steps 1 - 6 until all of your O2 Ring CSV files are in the SD_Card directory on your mac.
+8. Run the sync.sh script. If you want to skip synchronizing your sleep data and upload only the O2 Ring data, execute the following instead:
+
+```
+./sync.sh --skip-sync
+```
+
+The O2 ring CSV files will be zipped and uploaded to Sleep HQ using your Sleep HQ API Credentials.
 
 ### How do i enabla automatic uploads to Sleep HQ?
 
