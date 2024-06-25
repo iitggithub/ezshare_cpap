@@ -1,10 +1,9 @@
 #! /bin/bash
-# VERSION=14
+# VERSION=15
 #
 # Change log:
 #
-# - Added support for uploading O2 Ring csv files
-# - Added ability to skip some actions ie --skip-sync, and --skip-o2
+# - Added functionality to evict .icloud files causing issues creating the upload.zip file
 #
 # Script to sync data from an Ez Share WiFi SD card
 # to a folder called "SD_Card" on the local users desktop.
@@ -225,7 +224,12 @@ version_check
 createUploadFile() {
   echo -e "\nCreating upload.zip file..."
     cd "${sdCardDir}"
+
+    # Remove the existing upload.zip file
     test -f "${uploadZipFile}" && rm -f "${uploadZipFile}"
+
+    # upload zip file has been copied to iCloud. Evict the local copy
+    test -f ".${uploadZipFile}.icloud" && brctl evict "${uploadZipFile}"
 
     if [ -n "${fileList}" ]
       then
