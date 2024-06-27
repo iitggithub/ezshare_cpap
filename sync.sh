@@ -1,9 +1,9 @@
 #! /bin/bash
-# VERSION=15
+# VERSION=16
 #
 # Change log:
 #
-# - Added functionality to evict .icloud files causing issues creating the upload.zip file
+# - Fixed a bug where $PATH wasn't set and the ezshare-cli command wasn't found despite being installed
 #
 # Script to sync data from an Ez Share WiFi SD card
 # to a folder called "SD_Card" on the local users desktop.
@@ -29,6 +29,7 @@ fi
 sdCardDir="/Users/`whoami`/Desktop/SD_Card" # The location where SD card files will be synchronised
 uploadZipFileName="upload.zip" # The name of the zip file which will be uploaded to Sleep HQ
 uploadZipFile="${sdCardDir}/${uploadZipFileName}" # The absolute path to the Zip file containing files needing to be uploaded
+pythonReqPackages="ezshare" # contains the package(s) needing to be instlaled by Python in order for the script to function
 ezShareSyncInProgress=0 # Added to allow the removal of partially sync'd directories
 sleepHQuploadsEnabled=false # Determines whether to upload data to Sleep HQ
 sleepHQAPIBaseURL="https://sleephq.com" # The base URL for the Sleep HQ API
@@ -427,6 +428,7 @@ checkPythonConfiguration() {
     ;;
     *)
     python3cmd="`which python3`"
+    pip3Cmd="`which pip3`"
     ;;
   esac
 
@@ -436,11 +438,25 @@ checkPythonConfiguration() {
   if [ -z "`which ezshare-cli`" ]
     then
     echo "Can't find ezshare-cli utility."
-    echo "Installing ezshare-cli via pip.."
+    echo "Installing ezshare-cli via pip3 using the command:"
+    echo "${pip3Cmd} install ${pythonReqPackages}"
     echo
-    pip3 install ezshare || exit
+    ${pip3Cmd} install ${pythonReqPackages} || exit
     ezShareCLICmd="`which ezshare-cli`"
     echo
+    if [ -z "${ezShareCLICmd}" ]
+     then
+     echo "Failed to find ezshare-cli command using: "
+     echo "which ezshare-cli"
+     echo
+     echo "If pip3 requirements have already been satisfied for the ${pythonReqPackages} packages,"
+     echo "Make sure your PATH variable points to your Python bin directory correctly."
+     echo
+     echo "PATH is currently set to: `echo ${PATH}`"
+     echo
+     echo "Script cannot continue... exiting..."
+     exit 1
+    fi
     else
     ezShareCLICmd="`which ezshare-cli`" 
   fi
