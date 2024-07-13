@@ -1,71 +1,89 @@
 # ezshare_cpap
 
-Mac OSX script to pull CPAP Data from an Airsense 10 to a local machine for review via Oscar, upload to SleepHQ. The script also uploads O2 Ring CSV export files to Sleep HQ as well which is handy if you have a lot of files to upload.
-
-It might work with the Airsense 11 as well but I haven't tested it. Presumably if the directory structure and files are the same on the Airsense 11, it'll work no problem.
+This is a Mac OSX compatible bash script which is used to synchronize sleep data to your mac via an Ezshare Wifi SD card. It can also be used to automate the upload of your data to Sleep HQ.
 
 The script connects to the EZ Share WiFi SD card and synchronizes the data to a folder on your desktop called SD\_Card.
 
-If there is sleep data, the script will create a zip file called upload.zip which you can use to upload the data to Sleep HQ. Using a zip file means quicker transmissions and less overhead since we're only uploading new sleep data.
+# Features
 
-The script doesn't store any WiFi credentials in the script itself. Instead, it will store them in your Login Keychain. When you first run the script, it will prompt you for the WiFi SSID and Password for both the Ez Share SD card, and your home WiFi network. Once these details are saved in your Keychain, you don't have to enter them again.
+### PAP Compatibility
 
-The script will automatically update itself when new features are added so you don't have to.
+If all you're looking to do is synchronize the contents of the SD card with your mac (for review in Oscar etc), then the script will work for both the Airsense 10 and 11 machines as the directory structure on both machines are the same.
+
+For uploading of data to Sleep HQ however, the script has only been tested against the Airsense 10. It has not been confirmed whether it works with the Resmed Airsense 11 but the Identification.json and JOURNAL.JNL files are automatically included in the upload.zip file if they're present in the SD_Card directory.
+
+### Credentials securely stored in your Keychain
+
+The script doesn't store any WiFi credentials in the script itself or on the filesystem. Instead, it will store them in your Login Keychain. When you first run the script, it will prompt you for the WiFi SSID and Password for both the Ez Share SD card, and your home WiFi network. Once these details are saved in your Keychain, you don't have to enter them again.
+
+### Sleep HQ integration
+
+The script can be configured to automatically upload your data to Sleep HQ for review. The script will perform the upload provided that there is new sleep data since the last time the script was run.
+
+### Automatic updates
+
+The script is configured to automatically update itself so you don't have to. When new features are implemented or bugs are fixed, the script will automatically download the latest version, and execute it.
+
+### Parallelised operations
+
+The script is designed to perform operations such as downloading files from the SD card in parallel. During testing parallelizing operations interaction with the SD card resulted in between a 50 and 75% reduction in script execution time.
+
+### o2r (Wellue O2Ring) Sleep HQ integration
+
+The script will automatically send any csv files in the SD\_Card directory to Sleep HQ. This allows you to view Sp02, Movement, and pulse rate data alongside your CPAP therapy data charts. Simply download your data from the ViHealth app or via a tool such as o2r and save it as a CSV file, and place the files in the SD_Card directory on your Desktop. When you next run the script, it will automatically upload them to Sleep HQ.
+
+### Change the SD Card storage location
+
+As of version 17, the script can be configured to use a different directory to store the contents of your SD Card. When the script finds that the default SD card directory doesn't exist (/Users/YOUR_USERNAME/Desktop/SD_Card), a setup process is initiated. The script will ask for the correct location to store files and keep a record of that location in your keychain.
+
+If you have existing data in your SD_Card directory and would like to move it, simply rename and/or move your existing SD card directory. The next time the script executes, it will ask for the new directory location and store the location in your keychain.
+
+### Support for Multiple Wifi adaptors
+
+If you have more than one wifi adaptor, the script will force you to choose one to use moving forward. If you do not select one, the default will be used which is usually the first adaptor in the list.
+
+This means it's now possible to turn a mac into a magic uploader! Simply run the script every 10 to 15 minutes and it'll upload new sleep data to Sleep HQ!
 
 # Installation Pre-requisites
 
-- A mac. Because the script only works on a mac
-- Python3 installed on your mac (not the version installed via Xcode developer tools)
-- Perform an initial sync
-
-The ezshare-cli is built to work with Python 3. This guide doesn't go into installing Python 3 but you can download the macOS 64-bit universal2 installer for the latest stable version of Python3 from here: https://www.python.org/downloads/macos/ or you can try the homebrew method here: https://docs.python-guide.org/starting/install3/osx/
-
-### How do i know if i have python installed?
-
-Open a terminal and run the following command:
-
-```
-python3 -V
-```
-
-If you receive an error saying that the command was not found, you probably don't have python installed or it's not configured properly.
-
-### Why do i need to install the official version of Python 3 when Mac already provides Python 3?
-
-Because of incompatibilities between the Apple-provided version which really is designed for system use rather than use by external parties like you and me. If you want to read more information on the matter, see this topic which explains it in more detail:
-
-https://github.com/urllib3/urllib3/issues/3020
+NOTHING! Well, you need a mac... but that's it. The script is written so it requires no additional software/tools.
 
 ### Performing an initial sync
 
-If you've got a lot of data on your SD card already, I'd recommend the following steps because downloading all of your sleep data via the ezshare utility will be painfully slow.
+If you've got a lot of data on your SD card already, it's significantly quicker to connect your SD card directly to your mac and copy the contents of the SD Card into the SD_Card folder on your desktop. Once an initial sync has been performed subsequent executions will be much faster.
 
 1. Remove the SD Card from your CPAP device
 2. Connect it to your computer
-3. Create a folder on your desktop called SD_Card
+3. Create a folder on your desktop called SD_Card (The name is case sensitive!)
 4. Copy the contents of your SD Card into the newly created folder
 5. Place the SD card back into your CPAP device
-6. If you haven't already manually uploaded your data to Sleep HQ, you can do it now.
 
-When you run the script tomorrow morning it'll only upload that days worth of data so the script will complete in a couple of minutes.
+The next time you execute the script, it will search for any files that have been added since the last time the folder was synchronized.
+
+# Installation Pre-requisites
+
+1. An EZ Share Wifi SD Card. You can purchase them from [Ali Express](https://www.aliexpress.com/w/wholesale-ez-share-wifi-sd-card.html). I recommend purchasing more than one just in case they die.
+2. Your sleep data on the SD Card.
+3. The wifi details for the EZ Share Wifi SD card.
+4. The wifi details for your home Wifi network.
 
 # Installation
 
 Open a terminal window and perform the following actions.
 
-### Download the sync.sh script
+### 1. Download the sync.sh script
 
 ```
 curl -o sync.sh https://raw.githubusercontent.com/iitggithub/ezshare_cpap/main/sync.sh
 ```
 
-### Make the script executable
+### 2. Make the script executable
 
 ```
 chmod 755 sync.sh
 ```
 
-That's it. The script is ready to use. The script will install the ezshare CLI and collect your WiFi details when you first run it.
+That's it. The script is ready to use. The script will collect your WiFi details and Sleep HQ credentials when you first run it.
 
 # Running the script
 
@@ -96,7 +114,7 @@ The O2 ring CSV files will be zipped and uploaded to Sleep HQ using your Sleep H
 
 ### How do i enabla automatic uploads to Sleep HQ?
 
-If you've got an older version of the script, it will automatically update to version 9 which includes the functionality required interact with Sleep HQ. You'll need your Client UID and Client Secret in order to begin. These are generated in the Account Settings page of Sleep HQ.
+If you've got an older version of the script, you need to update to at least version 9 when the functionality was first implemented. Running the script should trigger an automatic update to the latest version. You'll need your Client UID and Client Secret in order to begin. These are generated in the Account Settings page of Sleep HQ.
 
 If you choose not to enable Sleep HQ uploads, it won't ask you again nor will it create an upload.zip file containing the files that have changed.
 
@@ -106,26 +124,11 @@ Either there's no update available or you're probably running the original versi
 
 ### Does it work with the Resmed Airsense 11?
 
-I don't know... does it?
+I don't know... does it? Some noteable changes have been made to accomate the Airsense 11 such as the inclusion of the Identification.json and JOURNAL.JNL in the upload.zip file but it still needs testing by an Airsense 11 user for confirmation.
 
 ### Does it work with INSERT\_CPAP\_MACHINE\_HERE?
 
 The only machine i've tested it with is the Airsense 10.
-
-### I get an AttributeError when trying to sync files
-
-If you're seeing an error ending with something like this:
-
-```
-...
-    for k,v in dirlist.items():
-               ^^^^^^^^^^^^^
-AttributeError: 'NoneType' object has no attribute 'items'
-```
-
-It's an issue with the files on the SD Card. Remove the SD Card from the machine and insert it into your computer. Create a blank file in the root directory of the SD card called "ezshare.cfg" (without quotes). Reinsert the SD card into the machine and try again.
-
-The ezshare-cli command assumes that a directory will contain links to '.', '..', or 'ezshare.cfg' which is how it determines if it's in a valid directory. Since . and .. are only present in sub directories, this error usually only occurs in the root directory. Because of this, creating the ezshare.cfg file in the root directory is the only known workaround at present.
 
 ### Help! I entered the wrong credentials
 
@@ -149,8 +152,48 @@ You can run the commands below to remove specific entries in the keychain. When 
 ./sync.sh --remove-sleephq
 ```
 
-#### Do all of the above ^
+#### How do i remove all credentials
 
 ```
 ./sync.sh --remove-all
 ```
+
+### How do i skip the SD Card sync
+
+```
+./sync.sh --skip-sync
+```
+
+### How do i skip Sleep HQ uploads (even if configured)
+
+```
+./sync.sh --skip-upload
+```
+
+### How do i skip the upload of o2 csv files?
+
+```
+./sync.sh --skip-o2sync
+```
+
+### How do i check which version of the script i'm running?
+
+```
+./sync.sh --version
+```
+
+### How do i change the number of files/directories to check in parallel?
+
+```
+./sync.sh --max-streams=X
+```
+
+Note that X should be a number equal to the number of parallel checks you'd like to run. Default is 15 files/directories checked in parallel.
+
+### How do i change the number of files to download in parallel?
+
+```
+./sync.sh --max-downloads=X
+```
+
+Note that X should be a number equal to the number of parallel downloads you'd like to run. Default is 5 downloads in parallel.
