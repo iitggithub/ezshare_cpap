@@ -1,5 +1,5 @@
 #! /bin/bash
-# VERSION=17
+# VERSION=18
 #
 # Change log:
 #
@@ -14,7 +14,7 @@
 ##################
 # GLOBAL VARIABLES
 ##################
-me="$(echo "${0}" | sed -e 's/.\///')" # The script name but without the ./ if it has one. Otherwise use ${0}
+me="$(echo "${0}" | sed -e 's|^./||')" # The script name but without the ./ if it has one. Otherwise use ${0}
 sdCardDir="/Users/$(whoami)/Desktop/SD_Card" # The location where SD card files will be synchronised
 uploadZipFileName="upload.zip" # The name of the zip file which will be uploaded to Sleep HQ
 uploadZipFile="${sdCardDir}/${uploadZipFileName}" # The absolute path to the Zip file containing files needing to be uploaded
