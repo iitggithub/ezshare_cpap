@@ -1,12 +1,9 @@
 #! /bin/bash
-# VERSION=18
+# VERSION=19
 #
 # Change log:
 #
-# - Removed python3 dependency
-# - Fixed many, many bugs
-# - Code cleanup
-# - update script to conform with bash best practices
+# - modified the list of network wifi adaptors to support the TP-Link AC1300 USB wifi dongle
 #
 # Script to sync data from an Ez Share WiFi SD card
 # to a folder called "SD_Card" on the local users desktop.
@@ -795,13 +792,13 @@ lastRunFile="${sdCardDir}/.sync_last_run_time" # stores the last time the script
 ############################
 
 # Get the WiFi adaptor name.
-wifiAdaptor="$(networksetup -listallhardwareports 2>/dev/null | grep -A1 'Wi-Fi' | grep 'Device' | awk '{print $2}')"
+wifiAdaptor="$(networksetup -listallhardwareports | egrep -A1 '802.11|Wi-Fi' | grep "Device" | awk '{print $2}' | sort -n)"
 
 # Can't continue without WiFi...
 if [ -z "${wifiAdaptor}" ]; then
   echo "Couldn't identify a valid Wifi adaptor. Below are the wifi adaptors we found"
-  echo "using the command: \"networksetup -listallhardwareports | grep -A1 'Wi-Fi'\""
-  networksetup -listallhardwareports | grep -A1 'Wi-Fi'
+  echo "using the command: \"networksetup -listallhardwareports | egrep -A1 '802.11|Wi-Fi'\""
+  networksetup -listallhardwareports | egrep -A1 '802.11|Wi-Fi'
   exit 1
 fi
 
