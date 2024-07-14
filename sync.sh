@@ -1,12 +1,12 @@
 #! /bin/bash
-# VERSION=20
+# VERSION=21
 #
 # Change log:
 #
-# - fixed the wifi adaptor list not displaying properly.
+# - settled on a configuration for the secondary wifi adaptor
+# - changed the ezshare URL to use the IP address to remove dependency on DNS
 #
-# Script to sync data from an Ez Share WiFi SD card
-# to a folder called "SD_Card" on the local users desktop.
+# Script to sync data from an Ez Share WiFi SD card to a folder on your mac
 
 ##################
 # GLOBAL VARIABLES
@@ -17,7 +17,7 @@ uploadZipFileName="upload.zip" # The name of the zip file which will be uploaded
 uploadZipFile="${sdCardDir}/${uploadZipFileName}" # The absolute path to the Zip file containing files needing to be uploaded
 lastRunFile="${sdCardDir}/.sync_last_run_time" # stores the last time the script was executed. DO NOT CHANGE THE NAME OF THIS FILE WITHOUT UPDATING findFilesInDir
 dirList=("dir?dir=A:") # contains a list of remote directories that need to be checked on the SD Card ie: dir?dir=A: dir?dir=A:\SETTINGS etc
-ezshareURL="http://ezshare.card/" # The base URL path to be prepended to each URL on the SD card
+ezshareURL="http://192.168.4.1/" # The base URL path to be prepended to each URL on the SD card
 maxParallelDirChecks=15 # The number of directories to check in parallel new/changed files
 maxParallelDownloads=5 # The number of files to download from the SD card at the same time
 ezShareSyncInProgress=0 # Added to allow the removal of partially sync'd directories
@@ -791,45 +791,14 @@ lastRunFile="${sdCardDir}/.sync_last_run_time" # stores the last time the script
 ## Wifi adaptor selection ##
 ############################
 
-# Get the WiFi adaptor name.
 wifiAdaptor="$(networksetup -listallhardwareports | egrep -A1 '802.11|Wi-Fi' | grep "Device" | awk '{print $2}' | sort -n)"
+numWifiAdaptors="$(echo "${wifiAdaptor}" | wc -l | awk '{print $1}')"
 
-# Can't continue without WiFi...
-if [ -z "${wifiAdaptor}" ]; then
+if [ "${numWifiAdaptors}" -eq 0 ]; then
   echo "Couldn't identify a valid Wifi adaptor. Below are the wifi adaptors we found"
   echo "using the command: \"networksetup -listallhardwareports | egrep -A1 '802.11|Wi-Fi'\""
   networksetup -listallhardwareports | egrep -A1 '802.11|Wi-Fi'
   exit 1
-fi
-
-# Check if there's more than one wifi adaptor
-# If there is, we need to figure out which one
-# the user wants  to use. 
-numWifiAdaptors="$(echo "${wifiAdaptor}" | wc -l | awk '{print $1}')"
-if [ "${numWifiAdaptors}" -gt 1 ]; then
-  # Search the keychain for a wifi adaptor name ie en0
-  keychainWifiAdaptor="$(security find-generic-password -ga "ezShareWifiAdaptor" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')"
-
-  if [ -n "${keychainWifiAdaptor}" ]; then
-    wifiAdaptor="${keychainWifiAdaptor}"
-  else
-    # We've got more than one wifi adaptor but none stored
-    # in the keychain. Ask the user which one they want to
-    # use and remember it in the keychain for future reference.
-    defaultWifiAdaptor="$(echo "${wifiAdaptor}" | head -1)"
-    echo -e  "\nMore than one WiFi adaptor was found on your mac:"
-    networksetup -listallhardwareports | egrep -A1 '802.11|Wi-Fi' | grep "Device" | awk '{print $2}' | sort -n
-    echo -e "\nPlease enter the adaptor name for the adaptor ${me} should use"
-    echo "or press enter to accept the first in the list."
-    echo -ne "\nYour selection (Default: ${defaultWifiAdaptor}): "
-    read -r wifiAdaptorSelection
-    if [ -n "${wifiAdaptorSelection}" ]; then
-      wifiAdaptor="${wifiAdaptorSelection}"
-    else
-      wifiAdaptor="${defaultWifiAdaptor}"
-      security add-generic-password -T "/usr/bin/security" -U -a "ezShareWifiAdaptor" -s "ezShare" -w "${wifiAdaptor}"
-    fi
-  fi
 fi
 
 ###################################
@@ -1031,6 +1000,11 @@ fi
 # actually begins execution.
 for arg in ${@}; do
   case "${arg}" in
+    "--dedicated")
+      if [ "${numWifiAdaptors}" -lt 2 ]; then
+        exit 0
+      fi
+    ;;
     "--skip-sync")
     sleepDataSyncEnabled=false
     ;;
@@ -1128,6 +1102,9 @@ for arg in ${@}; do
       echo "${0} --reset-sd"
       ezSharesdCardDir
       echo
+      echo "Dual wifi adaptor automation mode:"
+      echo "${0} --dedicated"
+      echo
       echo "Check internet connectivity:"
       echo "${0} --connection-check"
       echo
@@ -1184,12 +1161,13 @@ if ${sleepDataSyncEnabled}; then
   trap exitFunction INT TERM EXIT
 
   # Connect to the wifi network
-  if ! connectToWifiNetwork "${wifiAdaptor}" "${ezShareWifiSSID}" "${ezShareWiFiPassword}"; then
-    exit 1 # We failed to connect to the wifi network
-  fi
   if [ "${numWifiAdaptors}" -eq 1 ]; then
+    if ! connectToWifiNetwork "${wifiAdaptor}" "${ezShareWifiSSID}" "${ezShareWiFiPassword}"; then
+      exit 1 # We failed to connect to the wifi network
+    fi
     ezShareConnected=1 # Ensures we reconnect to the home wifi network if anything fails
   fi
+
   echo -e "\nVerifying connectivity to EZ Share Web Interface..."
   waitForConnectivity "$(echo ${ezshareURL} | sed -e 's/http:\/\///' | cut -f1 -d '/')"
 
