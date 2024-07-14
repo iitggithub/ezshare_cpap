@@ -1,9 +1,9 @@
 #! /bin/bash
-# VERSION=19
+# VERSION=20
 #
 # Change log:
 #
-# - modified the list of network wifi adaptors to support the TP-Link AC1300 USB wifi dongle
+# - fixed the wifi adaptor list not displaying properly.
 #
 # Script to sync data from an Ez Share WiFi SD card
 # to a folder called "SD_Card" on the local users desktop.
@@ -818,7 +818,7 @@ if [ "${numWifiAdaptors}" -gt 1 ]; then
     # use and remember it in the keychain for future reference.
     defaultWifiAdaptor="$(echo "${wifiAdaptor}" | head -1)"
     echo -e  "\nMore than one WiFi adaptor was found on your mac:"
-    networksetup -listallhardwareports | grep -A1 'Wi-Fi'
+    networksetup -listallhardwareports | egrep -A1 '802.11|Wi-Fi' | grep "Device" | awk '{print $2}' | sort -n
     echo -e "\nPlease enter the adaptor name for the adaptor ${me} should use"
     echo "or press enter to accept the first in the list."
     echo -ne "\nYour selection (Default: ${defaultWifiAdaptor}): "
