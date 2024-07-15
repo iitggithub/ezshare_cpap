@@ -40,9 +40,11 @@ If you have existing data in your SD_Card directory and would like to move it, s
 
 ### Support for Multiple Wifi adaptors
 
-If you have more than one wifi adaptor, the script will force you to choose one to use moving forward. If you do not select one, the default will be used which is usually the first adaptor in the list.
+If you have more than one wifi adaptor, the script will assume that you're using one of them to connect to the ezshare wifi SD card. It will no longer switch wifi networks, nor will it check for connectivity to the home wifi network. Should you disconnect the USB wifi adaptor, normal functionality is restored and wifi switching is re-enabled automatically.
 
 This means it's now possible to turn a mac into a magic uploader! Simply run the script every 10 to 15 minutes and it'll upload new sleep data to Sleep HQ!
+
+If you want to know how to enable it, see the FAQ section for more information.
 
 # Installation Pre-requisites
 
@@ -197,3 +199,34 @@ Note that X should be a number equal to the number of parallel checks you'd like
 ```
 
 Note that X should be a number equal to the number of parallel downloads you'd like to run. Default is 5 downloads in parallel.
+
+### How do i setup multiple wifi adaptors?
+
+Firstly, at the time of writing there aren't any wifi adaptors that are supported on Apple Silicon. Getting multiple wifi adaptors working in Mac OS requires a compatible wifi adaptor such as the TP-Link Archer T3U Plus AC1300 Wireless USB Adapter which can be purchased on [Amazon](https://a.co/d/ipqSiyv) for less than $20 USD. You can get a list of working adaptors and download the latest release from [Github](https://github.com/chris1111/Wireless-USB-Big-Sur-Adapter?tab=readme-ov-file).
+
+You then need to disable System Integrity Protection (SIP) which can only be performed in Mac OS Recovery mode. Instructions for this as well as driver installation can be found [here](https://github.com/chris1111/Wireless-USB-Big-Sur-Adapter/discussions/115).
+
+Once the driver is installed and you've rebooted, there will be a icon for the Wireless Network Utility in your notification bar.
+
+You MUST use the USB wifi adaptor to connect to your HOME Wifi. DNS and routing priorities are higher for the USB wifi adaptor so if you connect the wifi the other way around, you won't be able to connect to the internet or your local network and the only website you'll be able to resolve will be the ezshare.card website.
+
+Next, connect your built-in wifi adaptor to your ezshare wifi SD card wifi network.
+
+Now you've got your secondary wifi adaptor connected, you can run the sync.sh script whenever you want without interrupting your connection to the internet.
+
+Finally, you'll need configure the script to perform a sync periodically. The easiest way to do this is using the commands below:
+
+1. Open a new terminal window
+2. Download the EzshareSync.plist file to ~/Library/LaunchAgents
+
+```
+curl -o ~/Library/LaunchAgents/EzshareSync.plist https://raw.githubusercontent.com/iitggithub/ezshare_cpap/main/EzshareSync.plist
+```
+
+3. Tell launchd about it
+
+```
+launchctl load ~/Library/LaunchAgents/EzshareSync.plist
+```
+
+Using this method will result in a sync being performed every 15 minutes.
