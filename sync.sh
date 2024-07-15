@@ -1,10 +1,9 @@
 #! /bin/bash
-# VERSION=21
+# VERSION=22
 #
 # Change log:
 #
-# - settled on a configuration for the secondary wifi adaptor
-# - changed the ezshare URL to use the IP address to remove dependency on DNS
+# - Restricted storing of wifi credentials to executions where there is only 1 wifi adaptor
 #
 # Script to sync data from an Ez Share WiFi SD card to a folder on your mac
 
@@ -377,7 +376,7 @@ findRemoteDirs() {
 
     case "${name}" in
       # Skip processing directories we don't care about
-      "."|".."|".fseventsd"|".Spotlight-V100")
+      "."|".."|".fseventsd"|".Spotlight-V100"|"TRASHE~1")
         continue
       ;;
       *)
@@ -805,47 +804,49 @@ fi
 ## Wifi credential specification ##
 ###################################
 
-# Check to see if we can successfully pull WiFi Credentials
-# from the users Login keychain.
-ezShareWifiSSID="$(security find-generic-password -ga "ezShareWifiSSID" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')"
-ezShareWiFiPassword="$(security find-generic-password -ga "ezShareWiFiPassword" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')"
-homeWiFiSSID="$(security find-generic-password -ga "homeWiFiSSID" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')"
-homeWiFiPassword="$(security find-generic-password -ga "homeWiFiPassword" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')"
+if [ "${numWifiAdaptors}" -eq 1 ]; then
+  # Check to see if we can successfully pull WiFi Credentials
+  # from the users Login keychain.
+  ezShareWifiSSID="$(security find-generic-password -ga "ezShareWifiSSID" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')"
+  ezShareWiFiPassword="$(security find-generic-password -ga "ezShareWiFiPassword" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')"
+  homeWiFiSSID="$(security find-generic-password -ga "homeWiFiSSID" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')"
+  homeWiFiPassword="$(security find-generic-password -ga "homeWiFiPassword" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')"
 
-# If any of the credentials do not exist
-# prompt the user to create them.
-if [ -z "${ezShareWifiSSID}" ] ||
-   [ -z "${ezShareWiFiPassword}" ] ||
-   [ -z "${homeWiFiSSID}" ] ||
-   [ -z "${homeWiFiPassword}" ]; then
-  echo "Couldn't find WiFi details in your Login keychain. Setup process will"
-  echo "now begin. Press enter to accept defaults if there are any."
-  echo "Please note you may need to enter your password to make changes to"
-  echo "your Login keychain."
-  echo
-  echo -n "Please enter the WiFi SSID of the ezShare Wifi Card (Default: 'ez Share'): "
-  read -r ezShareWifiSSID
-  if [ -z "${ezShareWifiSSID}" ]; then
-    ezShareWifiSSID="ez Share"
+  # If any of the credentials do not exist
+  # prompt the user to create them.
+  if [ -z "${ezShareWifiSSID}" ] ||
+     [ -z "${ezShareWiFiPassword}" ] ||
+     [ -z "${homeWiFiSSID}" ] ||
+     [ -z "${homeWiFiPassword}" ]; then
+    echo "Couldn't find WiFi details in your Login keychain. Setup process will"
+    echo "now begin. Press enter to accept defaults if there are any."
+    echo "Please note you may need to enter your password to make changes to"
+    echo "your Login keychain."
+    echo
+    echo -n "Please enter the WiFi SSID of the ezShare Wifi Card (Default: 'ez Share'): "
+    read -r ezShareWifiSSID
+    if [ -z "${ezShareWifiSSID}" ]; then
+      ezShareWifiSSID="ez Share"
+    fi
+    echo -n "Please enter the WiFi password for the ezShare Wifi Card (Default: '88888888'): "
+    read -r ezShareWiFiPassword
+    if [ -z "${ezShareWiFiPassword}" ]; then
+      ezShareWiFiPassword="88888888"
+    fi
+    while [ -z "${homeWiFiSSID}" ]; do
+      echo -n "Please enter the SSID of your home WiFi network: "
+      read -r homeWiFiSSID
+    done
+    while [ -z "${homeWiFiPassword}" ]; do
+      echo -n "Please enter the WiFi password for your home WiFi network: "
+      read -r homeWiFiPassword
+    done
+    # Create the necessary entries in the users Login keychain 
+    security add-generic-password -T "/usr/bin/security" -U -a "ezShareWifiSSID" -s "ezShare" -w "${ezShareWifiSSID}"
+    security add-generic-password -T "/usr/bin/security" -U -a "ezShareWiFiPassword" -s "ezShare" -w "${ezShareWiFiPassword}"
+    security add-generic-password -T "/usr/bin/security" -U -a "homeWiFiSSID" -s "ezShare" -w "${homeWiFiSSID}"
+    security add-generic-password -T "/usr/bin/security" -U -a "homeWiFiPassword" -s "ezShare" -w "${homeWiFiPassword}"
   fi
-  echo -n "Please enter the WiFi password for the ezShare Wifi Card (Default: '88888888'): "
-  read -r ezShareWiFiPassword
-  if [ -z "${ezShareWiFiPassword}" ]; then
-    ezShareWiFiPassword="88888888"
-  fi
-  while [ -z "${homeWiFiSSID}" ]; do
-    echo -n "Please enter the SSID of your home WiFi network: "
-    read -r homeWiFiSSID
-  done
-  while [ -z "${homeWiFiPassword}" ]; do
-    echo -n "Please enter the WiFi password for your home WiFi network: "
-    read -r homeWiFiPassword
-  done
-  # Create the necessary entries in the users Login keychain 
-  security add-generic-password -T "/usr/bin/security" -U -a "ezShareWifiSSID" -s "ezShare" -w "${ezShareWifiSSID}"
-  security add-generic-password -T "/usr/bin/security" -U -a "ezShareWiFiPassword" -s "ezShare" -w "${ezShareWiFiPassword}"
-  security add-generic-password -T "/usr/bin/security" -U -a "homeWiFiSSID" -s "ezShare" -w "${homeWiFiSSID}"
-  security add-generic-password -T "/usr/bin/security" -U -a "homeWiFiPassword" -s "ezShare" -w "${homeWiFiPassword}"
 fi
 
 #######################################
