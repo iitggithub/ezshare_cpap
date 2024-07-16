@@ -223,10 +223,32 @@ Finally, you'll need configure the script to perform a sync periodically. The ea
 curl -o ~/Library/LaunchAgents/EzshareSync.plist https://raw.githubusercontent.com/iitggithub/ezshare_cpap/main/EzshareSync.plist
 ```
 
-3. Tell launchd about it
+3. Modify the file and update the path to the sync.sh script. By default the script contains the following which you will most likely need to change:
+
+```
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/sync.sh</string>
+    <string>--dedicated</string>
+  </array>
+```
+
+If your script is in the Downloads folder for example, you would update it to the following:
+
+```
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/MYUSER/Downloads/sync.sh</string>
+    <string>--dedicated</string>
+  </array>
+```
+
+Note that you will have to change MYUSER to the user you run the script as.
+
+4. Tell launchd about it
 
 ```
 launchctl load ~/Library/LaunchAgents/EzshareSync.plist
 ```
 
-Using this method will result in a sync being performed every 15 minutes.
+Using this method will result in a sync being performed every 15 minutes as long as the user is logged into the mac.
