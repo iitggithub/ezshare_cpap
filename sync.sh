@@ -1,9 +1,10 @@
 #! /bin/bash
-# VERSION=22
+# VERSION=23
 #
 # Change log:
 #
-# - Restricted storing of wifi credentials to executions where there is only 1 wifi adaptor
+# - A tmp file that was used during testing was erroneously deployed into prod. Script updated to remove it if it exists.
+# - Also added additional instructions to regain access to the ezshare web interface when running multiple network interfaces.
 #
 # Script to sync data from an Ez Share WiFi SD card to a folder on your mac
 
@@ -338,7 +339,9 @@ getRemoteFileSize() {
 fileDoesNotExist() {
   local file="${1}"
   if [ ! -f "${file}" ]; then
-    echo "${file} does not exist!" >>/tmp/sync.tmp
+    if [ -f "/tmp/sync.tmp" ]; then
+      rm -f /tmp/sync.tmp
+    fi
     return 0
   fi
   return 1

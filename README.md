@@ -251,4 +251,18 @@ Note that you will have to change MYUSER to the user you run the script as.
 launchctl load ~/Library/LaunchAgents/EzshareSync.plist
 ```
 
+5. (Optional) Add ezshare.card to the /etc/hosts file
+
+This will allow the web interface to be accessed via http://ezshare.card/
+
+```
+sudo cat | tee -a /etc/hosts <<EOF
+192.168.4.1\tezshare.card
+EOF
+```
+
+Note this isn't needed for the script to function since the directory listing can be directly accessed via http://192.168.4.1/dir?dir=A: but if you want to access the web interface for any other reason, you'll need to perform step 5.
+
+6. Try it out!
+
 Using this method will result in a sync being performed every 15 minutes as long as the user is logged into the mac.
