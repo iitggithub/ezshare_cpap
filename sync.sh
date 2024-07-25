@@ -1,10 +1,11 @@
 #! /bin/bash
-# VERSION=23
+# VERSION=24
 #
 # Change log:
 #
-# - A tmp file that was used during testing was erroneously deployed into prod. Script updated to remove it if it exists.
-# - Also added additional instructions to regain access to the ezshare web interface when running multiple network interfaces.
+# - Deployed a method for speeding up directory searching. Skip iterating over files in directories that haven't changed.
+# - Sped up connectivity checking by reducing the sleep timer and using the -o parameter to exit after receiving one packet.
+# - Added the --full-sync option to revert back to file by file checking rather than directory by directory searching allowing users to re-download files they've manually deleted in an existing directory
 #
 # Script to sync data from an Ez Share WiFi SD card to a folder on your mac
 
@@ -20,6 +21,7 @@ dirList=("dir?dir=A:") # contains a list of remote directories that need to be c
 ezshareURL="http://192.168.4.1/" # The base URL path to be prepended to each URL on the SD card
 maxParallelDirChecks=15 # The number of directories to check in parallel new/changed files
 maxParallelDownloads=5 # The number of files to download from the SD card at the same time
+fastsyncEnabled=true # Controls whether or not to use .html files to speed up directory searching
 ezShareSyncInProgress=0 # Added to allow the removal of partially sync'd directories
 sleepHQuploadsEnabled=false # Determines whether to upload data to Sleep HQ.
 sleepHQAPIBaseURL="https://sleephq.com" # The base URL for the Sleep HQ API
@@ -55,18 +57,20 @@ verifyKeychainAction() {
 # connectivity has been restored.
 waitForConnectivity() {
   target="${1}"
-  local failCount=0
-  while [ -z "$(ping -c4 "${target}" 2>/dev/null)" ]; do
-    sleep 2
-    if [ "${failCount}" -gt 12 ]; then
-      echo "Failed connectivity check to ${target}."
-      echo "Please check network connectivity."
-      echo
-      echo "Cannot continue... exiting..."
-      exit 1
+  local output
+  
+  for ((i=1;i<=5;i++)); do
+    if curl -s --connect-timeout 5 -I "${target}" | grep "^HTTP/" | awk '{print $2}' | egrep "200|302|301" >/dev/null; then
+      return 0
     fi
-     ((failCount++))
+    sleep 1
   done
+
+  echo "Failed connectivity check to ${target}."
+  echo "Please check network connectivity."
+  echo
+  echo "Cannot continue... exiting..."
+  exit 1
 }
 
 # Connects to a given wifi network
@@ -410,21 +414,61 @@ findFilesInDir() {
   local sdCardDir="${3}"
   local transferListFile="${4}"
   local lastRunDateInSeconds="${5}"
+  local fastsyncEnabled="${6}"
   local url="${ezshareURL}${uri}"
-  local html
-  
+ 
   local name
   local link
   local fileTimestamp
   local localPath
   local fileSize
 
-  html=$(curl -s "$url" 2>/dev/null)
+  local localHTMLFile
+  local tmpHTMLFile
+  local directoryName
+  local directoryPath
+
+  directoryPath="$(getLocalPath "dir" "${uri}")" # extract DATASTORE/20240704 from dir?dir=A:\DATASTORE\20240704
+
+  # Use the sdCardDir basename if we're in the root directory of the SD Card
+  # otherwise use the name of the remote directory that's being checked.
+  if [ "${directoryPath}" == "dir?dir=A:" ]; then
+    directoryName="$(basename "${sdCardDir}")"
+    localHTMLFile="${sdCardDir}/.${directoryName}.html"
+  else
+    directoryName="$(basename "${directoryPath}")" # extract 20240704 from DATASTORE/20240704
+    localHTMLFile="${sdCardDir}/${directoryPath}/.${directoryName}.html"
+  fi
+  
+  # Download the current contents of the directory on the SD card
+  tmpHTMLFile="/tmp/.${directoryName}.html"
+
+  # Remove the existing tmpHTMLFile so curl doesn't create a different file on us
+  test -f "${tmpHTMLFile}" && rm -f "${tmpHTMLFile}"
+
+  # Download the contents of the remote directory and store in the tmpFile
+  curl -s -o "${tmpHTMLFile}" "${url}" 2>/dev/null
+
+  if ${fastsyncEnabled}; then
+    # If the contents of the directory hasn't changed, skip this directory.
+    if diff -q "${tmpHTMLFile}" "${localHTMLFile}" >/dev/null 2>&1; then
+      rm -f "${tmpHTMLFile}"
+      return
+    fi
+
+    # Files in the directory have changed. Save the downloaded
+    # html file as .<FOLDER_NAME>.html in the folder
+    mv -f "${tmpHTMLFile}" "${localHTMLFile}"
+  else
+    # This is a full sync. Used the tmpHTMLFile and compare files instead of directories
+    localHTMLFile="${tmpHTMLFile}"
+  fi
 
   # extracts lines similar to the following:
   # 2024- 6- 7   20:50:24          64KB  <a href="http://192.168.4.1/download?file=JOURNAL.DAT"> Journal.dat</a>
   # and then iterates over each line
-  echo "$html" | grep "<a href=" | grep -v '&lt;DIR&gt;' | while read -r line; do
+  
+  grep "<a href=" "${localHTMLFile}" | grep -v '&lt;DIR&gt;' | while read -r line; do
     # extracts href value ie Journal.dat
     name=$(echo "${line}" | grep -oE '>[^<]*</a>' | cut -f2 -d '>' | cut -f1 -d '<' | sed 's/^ *//')
 
@@ -436,7 +480,7 @@ findFilesInDir() {
 
     case "${name}" in
       # Skip processing files we don't care about
-      "back to photo"|"ezshare.cfg"|".DS_Store"|"sync.sh"|".sync_last_run_time")
+      "back to photo"|"ezshare.cfg"|"sync.sh"|"UPLOAD.ZIP"|.*)
         continue
       ;;
       *)
@@ -564,7 +608,7 @@ createSleepDataZipFile() {
   done
 
   # Create a zip archive containing the files with relative paths
-  zip -r "${uploadZipFile}" "${fileList[@]}" --exclude '*DS_Store' && echo -e "\nCreated ${uploadZipFile} which includes dates ${startDate} to ${endDate}."
+  zip -r "${uploadZipFile}" "${fileList[@]}" --exclude '.*' --exclude 'SETTINGS/.*' --exclude '*DS_Store' && echo -e "\nCreated ${uploadZipFile} which includes dates ${startDate} to ${endDate}."
 
   # Don't bother continuing if the zip file hasn't been created.
   if [ ! -f "${uploadZipFile}" ]; then
@@ -750,6 +794,8 @@ fi
 
 # Check for updates and re-launch the script if necessary
 versionCheck "${me}" "${@}"
+
+overallStart="$(date +%s)"
 
 #################################
 ## SD Card directory selection ##
@@ -1009,6 +1055,9 @@ for arg in ${@}; do
         exit 0
       fi
     ;;
+    "--full-sync")
+    fastsyncEnabled=false
+    ;;
     "--skip-sync")
     sleepDataSyncEnabled=false
     ;;
@@ -1074,6 +1123,9 @@ for arg in ${@}; do
       echo "sync.sh <options>"
       echo
       echo "Options:"
+      echo
+      echo "Disables fast sync if missing files in a directory aren't being downloaded:"
+      echo "${0} --full-sync"
       echo
       echo "Don't sync files from the SD Card:"
       echo "${0} --skip-sync"
@@ -1173,10 +1225,10 @@ if ${sleepDataSyncEnabled}; then
   fi
 
   echo -e "\nVerifying connectivity to EZ Share Web Interface..."
-  waitForConnectivity "$(echo ${ezshareURL} | sed -e 's/http:\/\///' | cut -f1 -d '/')"
+  waitForConnectivity "${ezshareURL}"
 
   start="$(date +%s)"
-  echo -e "\nChecking for data that needs to be downloaded..."
+  echo -ne "\nSearching SD Card for directories to check... "
   # Discover all of the directories on the SD card
   # store the URL in the dirList array
   while IFS=' ' read -r item; do
@@ -1184,9 +1236,15 @@ if ${sleepDataSyncEnabled}; then
   done <<< "$(findRemoteDirs "${maxParallelDirChecks}" "${ezshareURL}" "${dirList[0]}" "${sdCardDir}")"
   wait
 
+  end="$(date +%s)"
+  timeTaken="$(echo "${end}-${start}" | bc)"
+  echo -e "DONE! Time taken: ${timeTaken} seconds."
+
+  start="$(date +%s)"
+  echo -e "\nSearching SD Card directories for files to download..."
   for remoteDirPath in "${dirList[@]}"; do
     echo "Checking ${ezshareURL}${remoteDirPath}"
-    findFilesInDir "${ezshareURL}" "${remoteDirPath}" "${sdCardDir}" "${transferListFile}" "${lastRunDateInSeconds}" &
+    findFilesInDir "${ezshareURL}" "${remoteDirPath}" "${sdCardDir}" "${transferListFile}" "${lastRunDateInSeconds}" "${fastsyncEnabled}" &
     # Limit the number of parallel jobs
     if [[ $(jobs -r -p | wc -l) -ge ${maxParallelDirChecks} ]]; then
       wait
@@ -1208,7 +1266,7 @@ if ${sleepDataSyncEnabled}; then
         exit 1 # We failed to connect to the wifi network
       fi
       ezShareConnected=0 # disables automatic reconnection to home wifi because we're already connected
-      waitForConnectivity "$(echo ${sleepHQAPIBaseURL} | sed -e 's/https:\/\///')"
+      waitForConnectivity "${sleepHQAPIBaseURL}"
     fi
     echo -e "\nLocal filesystem is already up to date with SD Card."
   else
@@ -1227,8 +1285,9 @@ if ${sleepDataSyncEnabled}; then
         exit 1 # We failed to connect to the wifi network
       fi
       ezShareConnected=0 # disables automatic reconnection to home wifi because we're already connected
-      waitForConnectivity "$(echo ${sleepHQAPIBaseURL} | sed -e 's/https:\/\///')"
     fi
+
+    waitForConnectivity "${sleepHQAPIBaseURL}"
 
     # if there's no sleep data, there's no point continuing
     # user was probably uploading files only.
@@ -1242,10 +1301,16 @@ if ${sleepDataSyncEnabled}; then
       storeLastRunTimestamp "$(date +%s)" "${lastRunFile}"
       # If uploads to sleep HQ are enabled, create the zip file and upload it.
       if ${sleepHQuploadsEnabled}; then
+        start="$(date +%s)"
         createSleepDataZipFile "${uploadZipFile}" "${transferListFile}"
+        end="$(date +%s)"
+        timeTaken="$(echo "${end}-${start}" | bc)"
+        echo -e "\nZip file creation complete. Time taken: ${timeTaken} seconds.\n"
 
         # Disable trapping because API errors will cause the script to terminate prematurely with no explanation.
         trap - INT TERM EXIT
+
+        start="$(date +%s)"
 
         # Generate an API token if necessary
         if [ -z "${sleepHQAccessToken}" ]; then
@@ -1272,7 +1337,7 @@ if ${sleepDataSyncEnabled}; then
 
         # get the Sleep HQ team ID if necessary
         if [ -z "${sleepHQTeamID}" ];then
-            echo -e "\nObtaining Sleep HQ Team ID..."
+            echo -ne "\nObtaining Sleep HQ Team ID... "
             sleepHQTeamID=$(getSleepHQTeamID "${sleepHQAccessToken}" "${sleepHQAPIBaseURL}")
             # Team ID is expected to be a number. If it's not something went wrong.
             if ! [[ ${sleepHQTeamID} =~ ^[0-9]+$ ]]; then
@@ -1284,6 +1349,7 @@ if ${sleepDataSyncEnabled}; then
               echo -e "\nCannot continue with upload... exiting now..."
               exit 1
             fi
+            echo "DONE! Sleep HQ Team ID set to ${sleepHQTeamID}."
         fi
 
         # Create an Import task
@@ -1317,6 +1383,10 @@ if ${sleepDataSyncEnabled}; then
 
         # Remove exit trapping because upload has either finished or been abandoned.
         trap - INT TERM EXIT
+
+        end="$(date +%s)"
+        timeTaken="$(echo "${end}-${start}" | bc)"
+        echo -e "\nUpload to Sleep HQ complete. Time taken: ${timeTaken} seconds.\n"
       fi
     fi
   fi
@@ -1360,7 +1430,7 @@ if ${o2RingSyncEnabled} && ${sleepHQuploadsEnabled}; then
 
     # get the Sleep HQ team ID if necessary
     if [ -z "${sleepHQTeamID}" ];then
-      echo -e "\nObtaining Sleep HQ Team ID..."
+      echo -ne "\nObtaining Sleep HQ Team ID... "
       sleepHQTeamID=$(getSleepHQTeamID "${sleepHQAccessToken}" "${sleepHQAPIBaseURL}")
       # Team ID is expected to be a number. If it's not something went wrong.
       if ! [[ ${sleepHQTeamID} =~ ^[0-9]+$ ]]; then
@@ -1372,6 +1442,7 @@ if ${o2RingSyncEnabled} && ${sleepHQuploadsEnabled}; then
         echo -e "\nCannot continue with upload... exiting now..."
         exit 1
       fi
+      echo "DONE! Sleep HQ Team ID set to ${sleepHQTeamID}."
     fi
 
     # Create an Import task
@@ -1410,4 +1481,7 @@ if ${o2RingSyncEnabled} && ${sleepHQuploadsEnabled}; then
   fi
 fi
 
-echo -e "\nScript execution complete!"
+overallEnd="$(date +%s)"
+overallTimeTaken="$(echo "${overallEnd}-${overallStart}" | bc)"
+
+echo -e "\nScript execution complete! Script execution time: ${overallTimeTaken} seconds."
