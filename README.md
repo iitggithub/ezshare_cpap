@@ -24,9 +24,24 @@ The script can be configured to automatically upload your data to Sleep HQ for r
 
 The script is configured to automatically update itself so you don't have to. When new features are implemented or bugs are fixed, the script will automatically download the latest version, and execute it.
 
-### Parallelised operations
+### Parallelised operations and faster directory searching
 
-The script is designed to perform operations such as downloading files from the SD card in parallel. During testing parallelizing operations interaction with the SD card resulted in between a 50 and 75% reduction in script execution time.
+The script is designed to perform operations against the SD card in parallel. This includes:
+
+1. Determining which directories on the SD card need to be checked
+2. Determining which files need to be downloaded
+3. Downloading files from the SD card
+
+The SD card that was used for testing contained 283 days worth of sleep data. Using the previous incarnation of the script which used the Python 3 ezshare module, the script took 260 seconds to check 283 days worth of sleep data, download 1 days worth of sleep data and upload that data to Sleep HQ.
+
+That same operation using the new script took 88 seconds to perform the same operations. The new script also provides timings for most of the stages so we can break that down as follows:
+
+1. Determining which directories on the SD card need to be checked: 13 seconds (285 directories)
+2. Determining which files need to be downloaded: 18 seconds
+3. Downloading files from the SD card: 7 seconds (17 files(1 days worth of sleep data))
+4. Creating a zip file to upload to Sleep HQ: 1 second
+5. Uploading the zip file to Sleep HQ: 34 seconds
+6. Misc operations (like connecting to different wifi networks, checking connectivity etc): 15 seconds
 
 ### o2r (Wellue O2Ring) Sleep HQ integration
 
@@ -40,7 +55,7 @@ If you have existing data in your SD_Card directory and would like to move it, s
 
 ### Support for Multiple Wifi adaptors
 
-If you have more than one wifi adaptor, the script will assume that you're using one of them to connect to the ezshare wifi SD card. It will no longer switch wifi networks, nor will it check for connectivity to the home wifi network. Should you disconnect the USB wifi adaptor, normal functionality is restored and wifi switching is re-enabled automatically.
+If you have more than one wifi adaptor, the script will assume that you're using one of them to connect to the ezshare wifi SD card. It will no longer switch wifi networks. Should you disconnect the USB wifi adaptor, normal functionality is restored and wifi switching is re-enabled automatically.
 
 This means it's now possible to turn a mac into a magic uploader! Simply run the script every 10 to 15 minutes and it'll upload new sleep data to Sleep HQ!
 
@@ -199,6 +214,20 @@ Note that X should be a number equal to the number of parallel checks you'd like
 ```
 
 Note that X should be a number equal to the number of parallel downloads you'd like to run. Default is 5 downloads in parallel.
+
+### I deleted files in a directory, Why are they not being downloaded again?
+
+The script keeps track of the contents of the SD card locally on the mac. In each directory there is a hidden html file (such as .SETTINGS.html in the SETTINGS directory). You will need to remove the file to force the directory to be checked.
+
+```
+rm -f /path/to/hidden/file
+```
+
+OR you can simply run the script with the --full-sync option which checks each file in every directory rather than just checking the directory itself.
+
+```
+./sync.sh --full-sync
+```
 
 ### How do i setup multiple wifi adaptors?
 
