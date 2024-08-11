@@ -1,11 +1,10 @@
 #! /bin/bash
-# VERSION=24
+# VERSION=25
 #
 # Change log:
 #
-# - Deployed a method for speeding up directory searching. Skip iterating over files in directories that haven't changed.
-# - Sped up connectivity checking by reducing the sleep timer and using the -o parameter to exit after receiving one packet.
-# - Added the --full-sync option to revert back to file by file checking rather than directory by directory searching allowing users to re-download files they've manually deleted in an existing directory
+# - Changed sync script to properly utilise curl options and not provide everything on the URI path
+# - Various layout changes and coloring
 #
 # Script to sync data from an Ez Share WiFi SD card to a folder on your mac
 
@@ -29,6 +28,11 @@ sleepDataSyncEnabled=true # Pulls data from SD Card and optionally pushes it to 
 o2RingSyncEnabled=true # Scans the ${sdCardDir} for O2 Ring CSV export files and uploads them to Sleep HQ
 o2RingDeviceID="69184" # The device ID for the O2 ring. This is hard coded on the server and shouldn't change.
 
+# Colors!
+red="\033[31m"
+green="\033[32m"
+reset="\033[0m"
+
 ################################
 ## SYNC.SH SPECIFIC FUNCTIONS ##
 ################################
@@ -43,10 +47,10 @@ verifyKeychainAction() {
   local output="${4}"
 
   if [ "${retVal}" -eq 0 ]; then
-    echo "Successfully performed ${action} against key ${key} in your keychain."
+    echo -e "${green}Successfully performed ${action} against key ${key} in your keychain.${reset}"
   else
     echo
-    echo "Failed to perform ${action} against key ${key} in your keychain."
+    echo -e "${red}Failed to perform ${action} against key ${key} in your keychain.${reset}"
     echo "Error Code: ${retVal}"
     echo "Error Info: ${output}"
   fi
@@ -66,7 +70,7 @@ waitForConnectivity() {
     sleep 1
   done
 
-  echo "Failed connectivity check to ${target}."
+  echo -e "${red} FAILED!${reset}\n\nFailed connectivity check to ${target}."
   echo "Please check network connectivity."
   echo
   echo "Cannot continue... exiting..."
@@ -84,7 +88,7 @@ connectToWifiNetwork() {
   while [ "${attempt}" -lt 5 ]; do
     echo -n "Connecting to WiFi network '${ssid}'... "
     if [[ -n $(networksetup -setairportnetwork "${wifiAdaptor}" "${ssid}" "${password}" 2>/dev/null) ]]; then
-      echo -e "\n\nFailed to connect to WiFi network ${ssid}.\n"
+      echo -e "\n\n${red}Failed to connect to WiFi network ${ssid}.${reset}\n"
       echo -n "Trying again in 10 seconds or press Control + C to exit"
       while [ "${i}" -lt 10 ]; do
         echo -n "."
@@ -93,7 +97,7 @@ connectToWifiNetwork() {
       done
       echo -e "\n\n"
     else
-      echo "done!"
+      echo -e "${green}DONE!${reset}"
       return 0 # we're connected to the WiFi network now..
     fi
     ((attempt+=1))
@@ -102,8 +106,8 @@ connectToWifiNetwork() {
   # Make sure we don't continue if 5 attempts if attempts > 5
   # this means we tried and failed to connect the EzShare WiFi network
   if [ "${attempt}" -eq 5 ]; then
-    echo -e "\n\nFailed to connect to WiFi network ${ssid}. Please make sure your SSID and password"
-    echo "are correct and the WiFi network is available."
+    echo -e "\n\n${red}Failed to connect to WiFi network ${ssid}. Please make sure your SSID and password"
+    echo -e "are correct and the WiFi network is available.${reset}"
     return 1
   fi
 }
@@ -178,7 +182,7 @@ versionCheck() {
   if [ "${lv}" -gt "${cv}" ]; then
     echo "Script update available. Auto-update from version ${cv} to ${lv} in progress..."
     curl -o "${me}" https://raw.githubusercontent.com/iitggithub/ezshare_cpap/main/sync.sh
-    echo "Done. Relaunching using ${me} ${args}"
+    echo -e "${green}Done${reset}. Relaunching using ${me} ${args}"
     bash "${me}" "${args}"
     exit
   fi
@@ -608,15 +612,16 @@ createSleepDataZipFile() {
   done
 
   # Create a zip archive containing the files with relative paths
-  zip -r "${uploadZipFile}" "${fileList[@]}" --exclude '.*' --exclude 'SETTINGS/.*' --exclude '*DS_Store' && echo -e "\nCreated ${uploadZipFile} which includes dates ${startDate} to ${endDate}."
+  zip -r "${uploadZipFile}" "${fileList[@]}" --exclude '.*' --exclude 'SETTINGS/.*' --exclude '*DS_Store'
 
   # Don't bother continuing if the zip file hasn't been created.
   if [ ! -f "${uploadZipFile}" ]; then
-    echo
-    echo "Failed to create ${uploadZipFile}."
+    echo -e " ${red}FAILED!${reset}\n\nFailed to create ${uploadZipFile}."
     echo "Cannot continue with automatic upload. Please upload your data manually."
     echo
     exit 1
+  else
+    echo -e "\n${green}DONE!${reset}\nCreated ${uploadZipFile} which includes dates ${startDate} to ${endDate}."
   fi
 }
 
@@ -640,15 +645,16 @@ createO2RingDataZipFile() {
   test -f "${sdCardDir}/.$(basename "${uploadZipFile}").icloud" && brctl evict "${uploadZipFile}"
 
   # Create a zip archive containing the files with relative paths
-  find "${sdCardDir}" -mindepth 1 -maxdepth 1 -type f -name "O2Ring*.csv" -print0 | xargs -0 -n 1 zip -r "${uploadZipFile}" && echo -e "\nCreated ${uploadZipFile}."
+  find "${sdCardDir}" -mindepth 1 -maxdepth 1 -type f -name "O2Ring*.csv" -print0 | xargs -0 -n 1 zip -r "${uploadZipFile}"
 
   # Don't bother continuing if the zip file hasn't been created.
   if [ ! -f "${uploadZipFile}" ]; then
-    echo
-    echo "Failed to create ${uploadZipFile}."
+    echo -e " ${red}FAILED!${reset}\n\nFailed to create ${uploadZipFile}."
     echo "Cannot continue with automatic upload. Please upload your data manually."
     echo
     exit 1
+  else
+    echo -e "${green}DONE!${reset}\nCreated ${uploadZipFile}."
   fi
 }
 
@@ -661,17 +667,23 @@ generateSleepHQAccessToken() {
   local sleepHQAPIBaseURL="${1}"
   local sleepHQClientUID="${2}"
   local sleepHQClientSecret="${3}"
+  local params
 
-  # Login
-  sleepHQLoginURL="${sleepHQAPIBaseURL}/oauth/token?"
-  sleepHQLoginURL="${sleepHQLoginURL}client_id=${sleepHQClientUID}"
-  sleepHQLoginURL="${sleepHQLoginURL}&client_secret=${sleepHQClientSecret}"
-  sleepHQLoginURL="${sleepHQLoginURL}&grant_type=password"
-  sleepHQLoginURL="${sleepHQLoginURL}&scope=read%20write"
+  params=()
+  params+=('-H')
+  params+=('Content-Type: application/x-www-form-urlencoded')
+  params+=('-d')
+  params+=('grant_type=password')
+  params+=('-d')
+  params+=("client_id=${sleepHQClientUID}")
+  params+=('-d')
+  params+=("client_secret=${sleepHQClientSecret}")
+  params+=('-d')
+  params+=('scope=read%20write')
 
   # Example json output:
   # {"access_token":"access_token_string_value","token_type":"Bearer","expires_in":7200,"refresh_token":"refresh_token_string_value","scope":"read write","created_at":1720655289}
-  curl -s -X 'POST' "${sleepHQLoginURL}" 2>/dev/null | awk -F '[:,{}]' '{for(i=1;i<=NF;i++){if($i~/"access_token\"/){print $(i+1)}}}' | sed 's/["]*//g'
+  curl -s "${sleepHQAPIBaseURL}/oauth/token" "${params[@]}" 2>/dev/null | awk -F '[:,{}]' '{for(i=1;i<=NF;i++){if($i~/"access_token\"/){print $(i+1)}}}' | sed 's/["]*//g'
 }
 
 # Get the current SleepHQ team ID for the user
@@ -679,9 +691,19 @@ getSleepHQTeamID() {
   local sleepHQAccessToken="${1}"
   local sleepHQAPIBaseURL="${2}"
 
+  local params
+
+  params=()
+  params+=('-H')
+  params+=('Content-Type: application/x-www-form-urlencoded')
+  params+=('-H')
+  params+=('accept: application/vnd.api+json')
+  params+=('-H')
+  params+=("authorization: Bearer ${sleepHQAccessToken}")
+
   # Example json output:
   # {"data":{"id":1234,"email":"email@host.com","current_team_id":1234,"profile_photo_url":null,"owned_team_ids":[1234],"name":"My Name"}}
-  curl -s -X 'GET' "${sleepHQAPIBaseURL}/api/v1/me" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}" 2>/dev/null | awk -F '[:,{}]' '{for(i=1;i<=NF;i++){if($i~/"current_team_id\"/){print $(i+1)}}}' | sed 's/[^0-9]*//g'
+  curl -s "${sleepHQAPIBaseURL}/api/v1/me" "${params[@]}" 2>/dev/null | awk -F '[:,{}]' '{for(i=1;i<=NF;i++){if($i~/"current_team_id\"/){print $(i+1)}}}' | sed 's/[^0-9]*//g'
 }
 
 # Create a Sleep  HQ Import task
@@ -690,16 +712,24 @@ createImportTask() {
   local sleepHQAPIBaseURL="${2}"
   local sleepHQTeamID="${3}"
   local sleepHQDeviceID="${4}"
-  local sleepHQImportTaskURL
 
-  sleepHQImportTaskURL="${sleepHQAPIBaseURL}/api/v1/teams/${sleepHQTeamID}/imports?"
-  sleepHQImportTaskURL="${sleepHQImportTaskURL}team_id=${sleepHQTeamID}&"
-  sleepHQImportTaskURL="${sleepHQImportTaskURL}programatic=true&"
-  sleepHQImportTaskURL="${sleepHQImportTaskURL}device_id=${sleepHQDeviceID}"
+  local params
+
+  params=()
+  params+=('-H')
+  params+=('Content-Type: application/x-www-form-urlencoded')
+  params+=('-H')
+  params+=('accept: application/vnd.api+json')
+  params+=('-H')
+  params+=("authorization: Bearer ${sleepHQAccessToken}")
+  params+=('-d')
+  params+=('programatic=true')
+  params+=('-d')
+  params+=("device_id=${sleepHQDeviceID}")
 
   # Example json output:
   # {"data":{"id":"1234567","type":"import","attributes":{"id":1234567,"team_id":1234,"name":null,"status":"uploading","file_size":null,"progress":0,"machine_id":null,"device_id":123456,"programatic":true,"failed_reason":null,"created_at":"2024-07-10 23:07:31 UTC","updated_at":"2024-07-10 23:07:31 UTC"},"relationships":{"files":{"data":[]}}}}
-  curl -s -X 'POST' "${sleepHQImportTaskURL}" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}" 2>/dev/null | awk -F '[:,{}]' '{for(i=1;i<=NF;i++){if($i~/"attributes\"/ && $(i+2)~/"id\"/){print $(i+3)}}}' | sed 's/[^0-9]*//g'
+  curl -s "${sleepHQAPIBaseURL}/api/v1/teams/${sleepHQTeamID}/imports" "${params[@]}" 2>/dev/null | awk -F '[:,{}]' '{for(i=1;i<=NF;i++){if($i~/"attributes\"/ && $(i+2)~/"id\"/){print $(i+3)}}}' | sed 's/[^0-9]*//g'
 }
 
 generateContentHash() {
@@ -719,13 +749,23 @@ uploadFileToSleepHQ() {
   local uploadZipFileName="${4}"
   local sleepHQcontentHash="${5}"
 
-  sleepHQImportFileURL="${sleepHQAPIBaseURL}/api/v1/imports/${sleepHQImportTaskID}/files?"
-  sleepHQImportFileURL="${sleepHQImportFileURL}import_id=${sleepHQImportTaskID}&"
-  sleepHQImportFileURL="${sleepHQImportFileURL}name=${uploadZipFileName}&"
-  sleepHQImportFileURL="${sleepHQImportFileURL}path=.%2F&"
-  sleepHQImportFileURL="${sleepHQImportFileURL}content_hash=${sleepHQcontentHash}"
-  
-  curl -s -X 'POST' "${sleepHQImportFileURL}" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}" -F "file=@${uploadZipFileName}" >/dev/null
+  local params
+
+  params=()
+  params+=('-H')
+  params+=('accept: application/vnd.api+json')
+  params+=('-H')
+  params+=("authorization: Bearer ${sleepHQAccessToken}")
+  params+=('-F')
+  params+=("name=${uploadZipFileName}")
+  params+=('-F')
+  params+=('path=.%2F')
+  params+=('-F')
+  params+=("content_hash=${sleepHQcontentHash}")
+  params+=('-F')
+  params+=("file=@${uploadZipFileName}")
+
+  curl -s "${sleepHQAPIBaseURL}/api/v1/imports/${sleepHQImportTaskID}/files" "${params[@]}" >/dev/null
 }
 
 # Instruct Sleep HQ to unpack the zip file and process the import
@@ -733,8 +773,15 @@ triggerDataImport() {
   local sleepHQAccessToken="${1}"
   local sleepHQAPIBaseURL="${2}"
   local sleepHQImportTaskID="${3}"
-  
-  curl -s -X 'POST' "${sleepHQAPIBaseURL}/api/v1/imports/${sleepHQImportTaskID}/process_files?id=${sleepHQImportTaskID}" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}" >/dev/null
+  local params
+
+  params=()
+  params+=('-H')
+  params+=('accept: application/vnd.api+json')
+  params+=('-H')
+  params+=("authorization: Bearer ${sleepHQAccessToken}")
+
+  curl -s -X 'POST' "${sleepHQAPIBaseURL}/api/v1/imports/${sleepHQImportTaskID}/process_files" "${params[@]}" >/dev/null
 }
 
 # wait for upload to complete and report upload progress
@@ -745,13 +792,22 @@ monitorImportProgress() {
   local progress=0
   local prevProgress=0
   local failCounter=0
+
+  local params
+
+  params=()
+  params+=('-H')
+  params+=('accept: application/vnd.api+json')
+  params+=('-H')
+  params+=("authorization: Bearer ${sleepHQAccessToken}")
+
   while [ "${progress}" -lt 100 ]; do
     if [ "${progress}" -ne 0 ]; then
       sleep 5 # Add a 5 second sleep timer to avoid API throttling
     fi
     # Example JSON output:
     # {"data":{"id":"1234567","type":"import","attributes":{"id":1234567,"team_id":1234,"name":null,"status":"complete","file_size":660936,"progress":100,"machine_id":12345,"device_id":12345,"programatic":true,"failed_reason":null,"created_at":"2024-07-10 22:49:20 UTC","updated_at":"2024-07-10 22:49:29 UTC"},"relationships":{"files":{"data":[{"id":"123456789","type":"imports/file"},{"id":"123456789","type":"imports/file"},{"id":"123456789","type":"imports/file"},{"id":"123456789","type":"imports/file"}]}}}}
-    progress=$(curl -s -X 'GET' "${sleepHQAPIBaseURL}/api/v1/imports/${sleepHQImportTaskID}" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}" 2>/dev/null | awk -F '[:,]' '{for(i=1;i<=NF;i++){if($i~/"progress"/){print $(i+1)}}}' | sed 's/[^0-9]*//g')
+    progress=$(curl -s "${sleepHQAPIBaseURL}/api/v1/imports/${sleepHQImportTaskID}" "${params[@]}" 2>/dev/null | awk -F '[:,]' '{for(i=1;i<=NF;i++){if($i~/"progress"/){print $(i+1)}}}' | sed 's/[^0-9]*//g')
     echo -ne "Progress: ${progress}% complete...\r"
     if [ "${prevProgress}" -eq "${progress}" ]; then
       if [ "${failCounter}" -eq 12 ]; then
@@ -768,7 +824,7 @@ monitorImportProgress() {
       prevProgress="${progress}"
     fi
   done
-  echo -ne '\n'
+  echo -ne "Progress: ${green}${progress}% complete${reset}...\n"
 }
 
 ################################################################################################################################################
@@ -941,7 +997,7 @@ if [ -z "${sleepHQClientUID}" ] ||
         echo
 
         echo
-        echo -n "Testing Sleep HQ API Credentials... "
+        echo -ne "Testing Sleep HQ API Credentials..."
         if [ -z "${sleepHQAccessToken}" ]; then
           sleepHQAccessToken=$(generateSleepHQAccessToken "${sleepHQAPIBaseURL}" "${sleepHQClientUID}" "${sleepHQClientSecret}")
         fi
@@ -950,8 +1006,7 @@ if [ -z "${sleepHQClientUID}" ] ||
         # If we've got an empty value for the ${sleepHQAccessToken}
         # we've failed to get one and can't continue
         if [ -z "${sleepHQAccessToken}" ]; then
-          echo
-          echo "Failed to obtain a Sleep HQ API Access Token."
+          echo -e " ${red}FAILED!${reset}\n\nFailed to obtain a Sleep HQ API Access Token."
           echo "Make sure your Client UID and Secret are correct and"
           echo "you can access the https://sleephq.com website in your"
           echo "web browser."
@@ -970,13 +1025,13 @@ if [ -z "${sleepHQClientUID}" ] ||
           bash "${me}" --remove-sleephq
           exit 1
         else
-          echo "PASS!"
+          echo -e " ${green}PASSED!${reset}"
         fi
 
         # Ask the user to provide their device type
         echo -e "\nWhat kind of CPAP device are you using with automated uploads? Enter an ID from the list below: \n"
 
-        curl -s -X 'GET' "${sleepHQAPIBaseURL}/api/v1/devices" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}" | awk '
+        curl -s "${sleepHQAPIBaseURL}/api/v1/devices" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}" | awk '
           function json_value(key) {
               match($0, "\"" key "\": *\"[^\"]*\"")
               value = substr($0, RSTART, RLENGTH)
@@ -1224,11 +1279,15 @@ if ${sleepDataSyncEnabled}; then
     ezShareConnected=1 # Ensures we reconnect to the home wifi network if anything fails
   fi
 
-  echo -e "\nVerifying connectivity to EZ Share Web Interface..."
-  waitForConnectivity "${ezshareURL}"
+  echo -ne "\nVerifying connectivity to EZ Share Web Interface..."
+  if waitForConnectivity "${ezshareURL}"
+    then
+    echo -e " ${green}DONE!${reset}"
+
+  fi
 
   start="$(date +%s)"
-  echo -ne "\nSearching SD Card for directories to check... "
+  echo -ne "\nSearching SD Card for directories to check..."
   # Discover all of the directories on the SD card
   # store the URL in the dirList array
   while IFS=' ' read -r item; do
@@ -1238,7 +1297,7 @@ if ${sleepDataSyncEnabled}; then
 
   end="$(date +%s)"
   timeTaken="$(echo "${end}-${start}" | bc)"
-  echo -e "DONE! Time taken: ${timeTaken} seconds."
+  echo -e " ${green}DONE!${reset} Time taken: ${timeTaken} seconds."
 
   start="$(date +%s)"
   echo -e "\nSearching SD Card directories for files to download..."
@@ -1314,57 +1373,62 @@ if ${sleepDataSyncEnabled}; then
 
         # Generate an API token if necessary
         if [ -z "${sleepHQAccessToken}" ]; then
-          echo -e "\nConnecting to Sleep HQ..."
+          echo -ne "\nConnecting to Sleep HQ..."
           sleepHQAccessToken=$(generateSleepHQAccessToken "${sleepHQAPIBaseURL}" "${sleepHQClientUID}" "${sleepHQClientSecret}")
 
           # Make sure we've got an access token.
           # If we've got an empty value for the ${sleepHQAccessToken}
           # we've failed to get one and can't continue
           if [ -z "${sleepHQAccessToken}" ]; then
-            echo -e "\nFailed to obtain a Sleep HQ API Access Token."
+            echo -e " ${red}FAILED!${reset}\n\nFailed to obtain a Sleep HQ API Access Token."
             echo "Make sure your Client UID and Secret are correct and"
             echo "you can access the https://sleephq.com website in your"
             echo "web browser."
-            echo -e "\nDebug output for troubleshooting is shownn below: "
+            echo -e "\nDebug output for troubleshooting is shown below: "
             echo -e "\nCommand:"
             echo "curl -X 'POST' \"${sleepHQLoginURL}\""
             echo -ne "\nOutput: "
             curl -X 'POST' "${sleepHQLoginURL}"
             echo -e "\n\nCannot continue with upload... exiting now..."
             exit 1
+          else
+            echo -e " ${green} DONE!${reset}"
           fi
         fi
 
         # get the Sleep HQ team ID if necessary
         if [ -z "${sleepHQTeamID}" ];then
-            echo -ne "\nObtaining Sleep HQ Team ID... "
+            echo -ne "\nObtaining Sleep HQ Team ID..."
             sleepHQTeamID=$(getSleepHQTeamID "${sleepHQAccessToken}" "${sleepHQAPIBaseURL}")
             # Team ID is expected to be a number. If it's not something went wrong.
             if ! [[ ${sleepHQTeamID} =~ ^[0-9]+$ ]]; then
-              echo -e "\nFailed to obtain your Sleep HQ Team ID. Debug output for troubleshooting is shownn below: "
+              echo -e " ${red}FAILED!${reset}\n\nFailed to obtain your Sleep HQ Team ID. Debug output for troubleshooting is shownn below: "
               echo -e "\nCommand:"
-              echo "curl -X 'GET' \"${sleepHQAPIBaseURL}/api/v1/me\" -H 'accept: application/vnd.api+json' -H \"authorization: Bearer ${sleepHQAccessToken}\""
+              echo "curl \"${sleepHQAPIBaseURL}/api/v1/me\" -H 'accept: application/vnd.api+json' -H \"authorization: Bearer ${sleepHQAccessToken}\""
               echo -ne "\nOutput: "
-              curl -X 'GET' "${sleepHQAPIBaseURL}/api/v1/me" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}"
+              curl "${sleepHQAPIBaseURL}/api/v1/me" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}"
               echo -e "\nCannot continue with upload... exiting now..."
               exit 1
             fi
-            echo "DONE! Sleep HQ Team ID set to ${sleepHQTeamID}."
+            echo -e " ${green}DONE!${reset} Sleep HQ Team ID set to ${sleepHQTeamID}."
         fi
 
         # Create an Import task
-        echo -e "\nCreating Data Import task..."
+        echo -ne "\nCreating Data Import task..."
         sleepHQImportTaskID=$(createImportTask "${sleepHQAccessToken}" "${sleepHQAPIBaseURL}" "${sleepHQTeamID}" "${sleepHQDeviceID}")
     
+
         # Import Task ID is expected to be a number. If it's not something went wrong.
         if ! [[ ${sleepHQImportTaskID} =~ ^[0-9]+$ ]]; then
-          echo -e "\nFailed to generate an Import Task ID. Debug output for troubleshooting is shownn below: \n"
+          echo -e " ${red}FAILED!${reset}\n\nFailed to generate an Import Task ID. Debug output for troubleshooting is shownn below: \n"
           echo "Command:"
           echo -e "curl -X 'POST' \"${sleepHQImportTaskURL}\" -H 'accept: application/vnd.api+json' -H \"authorization: Bearer ${sleepHQAccessToken}\"\n"
           echo -n "Output: "
           curl -X 'POST' "${sleepHQImportTaskURL}" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}"
           echo -e "\n\nCannot continue with upload... exiting now..."
           exit 1
+        else
+           echo -e "${green}DONE!${reset} Import Task ID: ${sleepHQImportTaskID}"
         fi  
 
         # Start trapping exit signals so we remove the
@@ -1373,10 +1437,16 @@ if ${sleepDataSyncEnabled}; then
 
         sleepHQcontentHash=$(generateContentHash "${uploadZipFileName}")
         
-        echo -e "\nUploading ${uploadZipFileName} to Sleep HQ..."
-        uploadFileToSleepHQ "${sleepHQAccessToken}" "${sleepHQAPIBaseURL}" "${sleepHQImportTaskID}" "${uploadZipFileName}" "${sleepHQcontentHash}"
+        echo -ne "\nUploading ${uploadZipFileName} to Sleep HQ..."
+        if uploadFileToSleepHQ "${sleepHQAccessToken}" "${sleepHQAPIBaseURL}" "${sleepHQImportTaskID}" "${uploadZipFileName}" "${sleepHQcontentHash}"
+          then
+          echo -e " ${green}DONE!${reset}"
+          else
+          echo -e " ${red}FAILED!${reset}"
+          exit 1
+        fi
 
-        echo -e "\nBeginning Data Import processing of ${uploadZipFileName} for Import Task ID ${sleepHQImportTaskID}..."
+        echo -e "\nBeginning Data Import processing of ${uploadZipFileName}...\n"
         triggerDataImport "${sleepHQAccessToken}" "${sleepHQAPIBaseURL}" "${sleepHQImportTaskID}"
 
         monitorImportProgress "${sleepHQAccessToken}" "${sleepHQAPIBaseURL}" "${sleepHQImportTaskID}"
@@ -1407,14 +1477,14 @@ if ${o2RingSyncEnabled} && ${sleepHQuploadsEnabled}; then
 
     # Generate an API token if necessary
     if [ -z "${sleepHQAccessToken}" ]; then
-      echo -e "\nConnecting to Sleep HQ..."
+      echo -ne "\nConnecting to Sleep HQ..."
       sleepHQAccessToken=$(generateSleepHQAccessToken "${sleepHQAPIBaseURL}" "${sleepHQClientUID}" "${sleepHQClientSecret}")
 
       # Make sure we've got an access token.
       # If we've got an empty value for the ${sleepHQAccessToken}
       # we've failed to get one and can't continue
       if [ -z "${sleepHQAccessToken}" ]; then
-        echo -e "\nFailed to obtain a Sleep HQ API Access Token."
+        echo -e " ${red}FAILED!${reset}\n\nFailed to obtain a Sleep HQ API Access Token."
         echo "Make sure your Client UID and Secret are correct and"
         echo "you can access the https://sleephq.com website in your"
         echo "web browser."
@@ -1425,39 +1495,43 @@ if ${o2RingSyncEnabled} && ${sleepHQuploadsEnabled}; then
         curl -X 'POST' "${sleepHQLoginURL}"
         echo -e "\n\nCannot continue with upload... exiting now..."
         exit 1
+      else
+        echo -e " ${green}DONE!${reset}"
       fi
     fi
 
     # get the Sleep HQ team ID if necessary
     if [ -z "${sleepHQTeamID}" ];then
-      echo -ne "\nObtaining Sleep HQ Team ID... "
+      echo -ne "\nObtaining Sleep HQ Team ID..."
       sleepHQTeamID=$(getSleepHQTeamID "${sleepHQAccessToken}" "${sleepHQAPIBaseURL}")
       # Team ID is expected to be a number. If it's not something went wrong.
       if ! [[ ${sleepHQTeamID} =~ ^[0-9]+$ ]]; then
-        echo -e "\nFailed to obtain your Sleep HQ Team ID. Debug output for troubleshooting is shownn below: "
+        echo -e " ${red}FAILED!${reset}\n\nFailed to obtain your Sleep HQ Team ID. Debug output for troubleshooting is shown below: "
         echo -e "\nCommand:"
-        echo "curl -X 'GET' \"${sleepHQAPIBaseURL}/api/v1/me\" -H 'accept: application/vnd.api+json' -H \"authorization: Bearer ${sleepHQAccessToken}\""
+        echo "curl \"${sleepHQAPIBaseURL}/api/v1/me\" -H 'accept: application/vnd.api+json' -H \"authorization: Bearer ${sleepHQAccessToken}\""
         echo -ne "\nOutput: "
-        curl -X 'GET' "${sleepHQAPIBaseURL}/api/v1/me" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}"
+        curl "${sleepHQAPIBaseURL}/api/v1/me" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}"
         echo -e "\nCannot continue with upload... exiting now..."
         exit 1
       fi
-      echo "DONE! Sleep HQ Team ID set to ${sleepHQTeamID}."
+      echo -e " ${green}DONE!${reset} Sleep HQ Team ID set to ${sleepHQTeamID}."
     fi
 
     # Create an Import task
-    echo -e "\nCreating Data Import task..."
+    echo -ne "\nCreating Data Import task..."
     sleepHQImportTaskID=$(createImportTask "${sleepHQAccessToken}" "${sleepHQAPIBaseURL}" "${sleepHQTeamID}" "${sleepHQDeviceID}")
     
     # Import Task ID is expected to be a number. If it's not something went wrong.
     if ! [[ ${sleepHQImportTaskID} =~ ^[0-9]+$ ]]; then
-      echo -e "\nFailed to generate an Import Task ID. Debug output for troubleshooting is shownn below: \n"
+      echo -e " ${red}FAILED!${reset}\n\nFailed to generate an Import Task ID. Debug output for troubleshooting is shown below: \n"
       echo "Command:"
       echo -e "curl -X 'POST' \"${sleepHQImportTaskURL}\" -H 'accept: application/vnd.api+json' -H \"authorization: Bearer ${sleepHQAccessToken}\"\n"
       echo -n "Output: "
       curl -X 'POST' "${sleepHQImportTaskURL}" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}"
       echo -e "\n\nCannot continue with upload... exiting now..."
       exit 1
+    else
+      echo -e " ${green}DONE!${reset}"
     fi  
 
     # Start trapping exit signals so we remove the
