@@ -53,31 +53,15 @@ As of version 17, the script can be configured to use a different directory to s
 
 If you have existing data in your SD_Card directory and would like to move it, simply rename and/or move your existing SD card directory. The next time the script executes, it will ask for the new directory location and store the location in your keychain.
 
-### Support for Multiple Wifi adaptors
+### Support for Multiple Wifi adapters
 
-If you have more than one wifi adaptor, the script will assume that you're using one of them to connect to the ezshare wifi SD card. It will no longer switch wifi networks. Should you disconnect the USB wifi adaptor, normal functionality is restored and wifi switching is re-enabled automatically.
+If you have more than one wifi adapter, the script will assume that you're using one of them to connect to the ezshare wifi SD card. It will no longer switch wifi networks. Should you disconnect the USB wifi adapter, normal functionality is restored and wifi switching is re-enabled automatically.
 
 This means it's now possible to turn a mac into a magic uploader! Simply run the script every 10 to 15 minutes and it'll upload new sleep data to Sleep HQ!
 
 If you want to know how to enable it, see the FAQ section for more information.
 
-# Installation Pre-requisites
-
-NOTHING! Well, you need a mac... but that's it. The script is written so it requires no additional software/tools.
-
-### Performing an initial sync
-
-If you've got a lot of data on your SD card already, it's significantly quicker to connect your SD card directly to your mac and copy the contents of the SD Card into the SD_Card folder on your desktop. Once an initial sync has been performed subsequent executions will be much faster.
-
-1. Remove the SD Card from your CPAP device
-2. Connect it to your computer
-3. Create a folder on your desktop called SD_Card (The name is case sensitive!)
-4. Copy the contents of your SD Card into the newly created folder
-5. Place the SD card back into your CPAP device
-
-The next time you execute the script, it will search for any files that have been added since the last time the folder was synchronized.
-
-# Installation Pre-requisites
+# Installation Prerequisites
 
 1. An EZ Share Wifi SD Card. You can purchase them from [Ali Express](https://www.aliexpress.com/w/wholesale-ez-share-wifi-sd-card.html). I recommend purchasing more than one just in case they die.
 2. Your sleep data on the SD Card.
@@ -108,6 +92,18 @@ That's it. The script is ready to use. The script will collect your WiFi details
 ./sync.sh
 ```
 
+### Performing an initial sync
+
+If you've got a lot of data on your SD card already, it's significantly quicker to connect your SD card directly to your mac and copy the contents of the SD Card into the SD_Card folder on your desktop. Once an initial sync has been performed subsequent executions will be much faster.
+
+1. Remove the SD Card from your CPAP device
+2. Connect it to your computer
+3. Create a folder on your desktop called SD_Card (The name is case sensitive!)
+4. Copy the contents of your SD Card into the newly created folder
+5. Place the SD card back into your CPAP device
+
+The next time you execute the script, it will search for any files that have been added since the last time the folder was synchronized.
+
 # Frequently Asked Questions
 
 ### How do i upload O2 ring data to sleep HQ?
@@ -129,7 +125,7 @@ Once you've synchronized your O2 data to your phone in the ViHealth Android app,
 
 The O2 ring CSV files will be zipped and uploaded to Sleep HQ using your Sleep HQ API Credentials.
 
-### How do i enabla automatic uploads to Sleep HQ?
+### How do i enable automatic uploads to Sleep HQ?
 
 If you've got an older version of the script, you need to update to at least version 9 when the functionality was first implemented. Running the script should trigger an automatic update to the latest version. You'll need your Client UID and Client Secret in order to begin. These are generated in the Account Settings page of Sleep HQ.
 
@@ -141,11 +137,11 @@ Either there's no update available or you're probably running the original versi
 
 ### Does it work with the Resmed Airsense 11?
 
-I don't know... does it? Some noteable changes have been made to accomate the Airsense 11 such as the inclusion of the Identification.json and JOURNAL.JNL in the upload.zip file but it still needs testing by an Airsense 11 user for confirmation.
+I don't know... does it? Some notable changes have been made to accommodate the Airsense 11 such as the inclusion of the Identification.json and JOURNAL.JNL in the upload.zip file but it still needs testing by an Airsense 11 user for confirmation.
 
 ### Does it work with INSERT\_CPAP\_MACHINE\_HERE?
 
-The only machine i've tested it with is the Airsense 10.
+The only machine I've tested it with is the Airsense 10.
 
 ### Help! I entered the wrong credentials
 
@@ -229,21 +225,21 @@ OR you can simply run the script with the --full-sync option which checks each f
 ./sync.sh --full-sync
 ```
 
-### How do i setup multiple wifi adaptors?
+### How do i setup multiple wifi adapters?
 
-Firstly, at the time of writing there aren't any wifi adaptors that are supported on Apple Silicon. Getting multiple wifi adaptors working in Mac OS requires a compatible wifi adaptor such as the TP-Link Archer T3U Plus AC1300 Wireless USB Adapter which can be purchased on [Amazon](https://a.co/d/ipqSiyv) for less than $20 USD. You can get a list of working adaptors and download the latest release from [Github](https://github.com/chris1111/Wireless-USB-Big-Sur-Adapter?tab=readme-ov-file).
+Firstly, at the time of writing there aren't any wifi adapters that are supported on Apple Silicon. Getting multiple wifi adapters working in Mac OS requires a compatible wifi adapter such as the TP-Link Archer T3U Plus AC1300 Wireless USB Adapter which can be purchased on [Amazon](https://a.co/d/ipqSiyv) for less than $20 USD. You can get a list of working adapters and download the latest release from [Github](https://github.com/chris1111/Wireless-USB-Big-Sur-Adapter?tab=readme-ov-file).
 
 You then need to disable System Integrity Protection (SIP) which can only be performed in Mac OS Recovery mode. Instructions for this as well as driver installation can be found [here](https://github.com/chris1111/Wireless-USB-Big-Sur-Adapter/discussions/115).
 
-Once the driver is installed and you've rebooted, there will be a icon for the Wireless Network Utility in your notification bar.
+Once the driver is installed and you've rebooted, there will be an icon for the Wireless Network Utility in your notification bar.
 
-You MUST use the USB wifi adaptor to connect to your HOME Wifi. DNS and routing priorities are higher for the USB wifi adaptor so if you connect the wifi the other way around, you won't be able to connect to the internet or your local network and the only website you'll be able to resolve will be the ezshare.card website.
+You MUST use the USB wifi adapter to connect to your HOME Wifi. DNS and routing priorities are higher for the USB wifi adapter so if you connect the wifi the other way around, you won't be able to connect to the internet or your local network and the only website you'll be able to resolve will be the ezshare.card website.
 
-Next, connect your built-in wifi adaptor to your ezshare wifi SD card wifi network.
+Next, connect your built-in wifi adapter to your ezshare wifi SD card wifi network.
 
-Now you've got your secondary wifi adaptor connected, you can run the sync.sh script whenever you want without interrupting your connection to the internet.
+Now you've got your secondary wifi adapter connected, you can run the sync.sh script whenever you want without interrupting your connection to the internet.
 
-Finally, you'll need configure the script to perform a sync periodically. The easiest way to do this is using the commands below:
+Finally, you'll need to configure the script to perform a sync periodically. The easiest way to do this is using the commands below:
 
 1. Open a new terminal window
 2. Download the EzshareSync.plist file to ~/Library/LaunchAgents
