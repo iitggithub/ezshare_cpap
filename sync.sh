@@ -1,10 +1,9 @@
 #! /bin/bash
-# VERSION=25
+# VERSION=26
 #
 # Change log:
 #
-# - Changed sync script to properly utilise curl options and not provide everything on the URI path
-# - Various layout changes and coloring
+# - .upload.zip.icloud file is now automatically evicted and removed from the filesystem
 #
 # Script to sync data from an Ez Share WiFi SD card to a folder on your mac
 
@@ -585,8 +584,11 @@ createSleepDataZipFile() {
   # Remove the existing upload.zip file
   test -f "${uploadZipFile}" && rm -f "${uploadZipFile}"
 
-  # upload zip file has been copied to iCloud. Evict the local copy
-  test -f "$(dirname "${uploadZipFile}")/.$(basename "${uploadZipFile}").icloud" && brctl evict "${uploadZipFile}"
+  # upload zip file has been copied to iCloud. Evict the local copy and remove the .icloud file
+  if -f "$(dirname "${uploadZipFile}")/.$(basename "${uploadZipFile}").icloud"; then
+    brctl evict "${uploadZipFile}"
+    rm -f "$(dirname "${uploadZipFile}")/.$(basename "${uploadZipFile}").icloud"
+  fi
 
   # Read each line from the input file
   while IFS= read -r line; do
