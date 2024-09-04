@@ -1,9 +1,10 @@
 #! /bin/bash
-# VERSION=26
+# VERSION=27
 #
 # Change log:
 #
-# - .upload.zip.icloud file is now automatically evicted and removed from the filesystem
+# - Fixed a bug. Failures to download HTML content from the SD card was triggeriing its own file downloads.
+# - Fixed a syntax error when checking for the existance of .icloud files
 #
 # Script to sync data from an Ez Share WiFi SD card to a folder on your mac
 
@@ -368,12 +369,12 @@ findRemoteDirs() {
 
   html=$(curl -s "$url" 2>/dev/null)
   if [ -z "${html}" ]; then
-    echo "Something went wrong executing the command below:"
-    echo
-    echo "curl \"${url}\""
-    echo
-    echo "Cannot process the url. Skipping..."
-    exit 1
+    echo "Something went wrong executing the command below:" >>/dev/stderr
+    echo >>/dev/stderr
+    echo "curl \"${url}\"" >>/dev/stderr
+    echo >>/dev/stderr
+    echo "Cannot process the url. Skipping..." >>/dev/stderr
+    return
   fi
 
   # extracts lines similar to the following:
@@ -585,7 +586,7 @@ createSleepDataZipFile() {
   test -f "${uploadZipFile}" && rm -f "${uploadZipFile}"
 
   # upload zip file has been copied to iCloud. Evict the local copy and remove the .icloud file
-  if -f "$(dirname "${uploadZipFile}")/.$(basename "${uploadZipFile}").icloud"; then
+  if [ -f "$(dirname "${uploadZipFile}")/.$(basename "${uploadZipFile}").icloud" ]; then
     brctl evict "${uploadZipFile}"
     rm -f "$(dirname "${uploadZipFile}")/.$(basename "${uploadZipFile}").icloud"
   fi
