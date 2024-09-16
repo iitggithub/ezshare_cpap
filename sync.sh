@@ -16,6 +16,7 @@ sdCardDir="/Users/$(whoami)/Desktop/SD_Card" # The location where SD card files 
 uploadZipFileName="upload.zip" # The name of the zip file which will be uploaded to Sleep HQ
 uploadZipFile="${sdCardDir}/${uploadZipFileName}" # The absolute path to the Zip file containing files needing to be uploaded
 lastRunFile="${sdCardDir}/.sync_last_run_time" # stores the last time the script was executed. DO NOT CHANGE THE NAME OF THIS FILE WITHOUT UPDATING findFilesInDir
+lockfile="${sdCardDir}/.sync.sh.lock" # A temporary file used to make sure only one instance of the script can be executed at a time
 dirList=("dir?dir=A:") # contains a list of remote directories that need to be checked on the SD Card ie: dir?dir=A: dir?dir=A:\SETTINGS etc
 ezshareURL="http://192.168.4.1/" # The base URL path to be prepended to each URL on the SD card
 maxParallelDirChecks=15 # The number of directories to check in parallel new/changed files
@@ -60,10 +61,15 @@ verifyKeychainAction() {
 # execution until internet
 # connectivity has been restored.
 waitForConnectivity() {
-  target="${1}"
+  local target="${1}"
   local output
+  local attempts="5"
+
+  if [ "${numWifiAdaptors}" -gt 1 ]; then
+    attempts="999" # Keep trying indefinitely
+  fi
   
-  for ((i=1;i<=5;i++)); do
+  for ((i=1;i<=${attempts};i++)); do
     if curl -s --connect-timeout 5 -I "${target}" | grep "^HTTP/" | awk '{print $2}' | egrep "200|302|301" >/dev/null; then
       return 0
     fi
@@ -154,6 +160,11 @@ exitFunction() {
     echo "Please make sure to visit the Data Imports section of the Sleep HQ"
     echo "website to delete the import because this script is not scoped for"
     echo "DELETE operations intentionally."
+  fi
+
+  # Remove the lock file if it exists
+  if [ -f "${lockfile}" ]; then
+    rm -f "${lockfile}"
   fi
 
   trap - INT TERM EXIT
@@ -855,6 +866,16 @@ fi
 versionCheck "${me}" "${@}"
 
 overallStart="$(date +%s)"
+
+#################################
+####### Lockfile creation #######
+#################################
+
+# Try to create a lock using shlock or exit if one already exists
+if ! shlock -p $$ -f "${lockfile}"; then
+  echo "Script is already running or you need to remove ${lockfile}."
+  exit 1
+fi
 
 #################################
 ## SD Card directory selection ##
@@ -1560,5 +1581,10 @@ fi
 
 overallEnd="$(date +%s)"
 overallTimeTaken="$(echo "${overallEnd}-${overallStart}" | bc)"
+
+# Remove the lock file if it exists
+if [ -f "${lockfile}" ]; then
+  rm -f "${lockfile}"
+fi
 
 echo -e "\nScript execution complete! Script execution time: ${overallTimeTaken} seconds."
