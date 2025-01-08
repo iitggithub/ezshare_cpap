@@ -1,10 +1,9 @@
 #! /bin/bash
-# VERSION=28
+# VERSION=29
 #
 # Change log:
 #
-# - Fixed a bug. Failures to download HTML content from the SD card was triggeriing its own file downloads.
-# - Fixed a syntax error when checking for the existance of .icloud files
+# - Fixed a bug where the script kept prompting for sleep hq creds
 #
 # Script to sync data from an Ez Share WiFi SD card to a folder on your mac
 
@@ -1107,8 +1106,10 @@ if [ -z "${sleepHQClientUID}" ] ||
       # both sleepHQClientUID and sleepHQClientSecret in the users keychain
       sleepHQClientUID="false"
       sleepHQClientSecret="false"
+      sleepHQDeviceID="false"
       security add-generic-password -T "/usr/bin/security" -U -a "sleepHQClientUID" -s "ezShare" -w "${sleepHQClientUID}" # set the value to false
       security add-generic-password -T "/usr/bin/security" -U -a "sleepHQClientSecret" -s "ezShare" -w "${sleepHQClientSecret}" # set the value to false
+      security add-generic-password -T "/usr/bin/security" -U -a "sleepHQDeviceID" -s "ezShare" -w "${sleepHQDeviceID}" # set the value to false
     ;;
   esac
 fi
