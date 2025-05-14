@@ -88,34 +88,50 @@ connectToWifiNetwork() {
   local ssid="${2}"
   local password="${3}"
   local attempt=0
-  local i=0
+  local waitTime=10
+  local os="$(uname)"
+  local connected
 
-  while [ "${attempt}" -lt 5 ]; do
-    echo -n "Connecting to WiFi network '${ssid}'... "
-    if [[ -n $(networksetup -setairportnetwork "${wifiAdaptor}" "${ssid}" "${password}" 2>/dev/null) ]]; then
-      echo -e "\n\n${red}Failed to connect to WiFi network ${ssid}.${reset}\n"
-      echo -n "Trying again in 10 seconds or press Control + C to exit"
-      while [ "${i}" -lt 10 ]; do
-        echo -n "."
-        sleep 1
-        ((i+=1))
-      done
-      echo -e "\n\n"
-    else
+  while (( attempt < 5 )); do
+    echo -n "Connecting to Wi-Fi '${ssid}' on ${wifiAdaptor}… "
+    connected=false
+
+    case "${os}" in
+      Darwin)
+        if networksetup -setairportnetwork "${wifiAdaptor}" "${ssid}" "${password}" &>/dev/null; then
+          connected=true
+        fi
+        ;;
+      Linux)
+        if sudo nmcli device wifi connect "${ssid}" password "${password}" &>/dev/null; then
+          connected=true
+        fi
+        ;;
+      *)
+        echo -e "${red}Unsupported OS: ${os}.${reset}"
+        exit 1
+        ;;
+    esac
+
+    if ${connected}; then
       echo -e "${green}DONE!${reset}"
-      return 0 # we're connected to the WiFi network now..
+      return 0
     fi
-    ((attempt+=1))
+
+    echo -e "\n\n${red}Failed to connect to Wi-Fi '${ssid}'.${reset}\n"
+    echo -n "Retrying in ${waitTime}s (Ctrl+C to abort)"
+    for (( i=0; i<${waitTime}; i++ )); do
+      echo -n "."
+      sleep 1
+    done
+    echo -e "\n\n"
+    (( attempt++ ))
   done
 
-  # Make sure we don't continue if 5 attempts if attempts > 5
-  # this means we tried and failed to connect the EzShare WiFi network
-  if [ "${attempt}" -eq 5 ]; then
-    echo -e "\n\n${red}Failed to connect to WiFi network ${ssid}. Please make sure your SSID and password"
-    echo -e "are correct and the WiFi network is available.${reset}"
-    return 1
-  fi
+  echo -e "\n\n${red}Unable to connect to Wi-Fi '${ssid}' after ${attempt} attempts.${reset}"
+  return 1
 }
+
 
 # Exit function which makes sure we clean up
 # after ourselves and reconnect to the home WiFi
@@ -867,16 +883,6 @@ versionCheck "${me}" "${@}"
 overallStart="$(date +%s)"
 
 #################################
-####### Lockfile creation #######
-#################################
-
-# Try to create a lock using shlock or exit if one already exists
-if ! shlock -p $$ -f "${lockfile}"; then
-  echo "Script is already running or you need to remove ${lockfile}."
-  exit 1
-fi
-
-#################################
 ## SD Card directory selection ##
 #################################
 
@@ -913,6 +919,17 @@ fi
 # Reset the following global variables just in case they've changed
 uploadZipFile="${sdCardDir}/${uploadZipFileName}" # The absolute path to the Zip file containing files needing to be uploaded
 lastRunFile="${sdCardDir}/.sync_last_run_time" # stores the last time the script was executed. DO NOT CHANGE THE NAME OF THIS FILE WITHOUT UPDATING findFilesInDir
+lockfile="${sdCardDir}/.sync.sh.lock" # A temporary file used to make sure only one instance of the script can be executed at a time
+
+#################################
+####### Lockfile creation #######
+#################################
+
+# Try to create a lock using shlock or exit if one already exists
+if ! shlock -p $$ -f "${lockfile}"; then
+  echo "Script is already running or you need to remove ${lockfile}."
+  exit 1
+fi
 
 ############################
 ## Wifi adaptor selection ##
