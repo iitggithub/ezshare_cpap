@@ -1,21 +1,31 @@
 #! /bin/bash
-# VERSION=29
+# VERSION=30
 #
 # Change log:
 #
-# - Fixed a bug where the script kept prompting for sleep hq creds
+# - Updated script to add support for running on Linux
 #
 # Script to sync data from an Ez Share WiFi SD card to a folder on your mac
 
 ##################
 # GLOBAL VARIABLES
 ##################
-me="$(echo "${0}" | sed -e 's|^./||')" # The script name but without the ./ if it has one. Otherwise use ${0}
-sdCardDir="/Users/$(whoami)/Desktop/SD_Card" # The location where SD card files will be synchronised
+os="$(uname)"
+case "${os}" in
+  Linux)
+    sdCardDir="${HOME}/SD_Card" # The location where SD card files will be synchronised
+    ezshareConfigDir="${HOME}/.ezshare" # Configuration files are stored here
+    ;;
+  *)
+    sdCardDir="/Users/$(whoami)/Desktop/SD_Card" # The location where SD card files will be synchronised
+    ;;
+esac
+
 uploadZipFileName="upload.zip" # The name of the zip file which will be uploaded to Sleep HQ
 uploadZipFile="${sdCardDir}/${uploadZipFileName}" # The absolute path to the Zip file containing files needing to be uploaded
 lastRunFile="${sdCardDir}/.sync_last_run_time" # stores the last time the script was executed. DO NOT CHANGE THE NAME OF THIS FILE WITHOUT UPDATING findFilesInDir
 lockfile="${sdCardDir}/.sync.sh.lock" # A temporary file used to make sure only one instance of the script can be executed at a time
+me="$(echo "${0}" | sed -e 's|^./||')" # The script name but without the ./ if it has one. Otherwise use ${0}
 dirList=("dir?dir=A:") # contains a list of remote directories that need to be checked on the SD Card ie: dir?dir=A: dir?dir=A:\SETTINGS etc
 ezshareURL="http://192.168.4.1/" # The base URL path to be prepended to each URL on the SD card
 maxParallelDirChecks=15 # The number of directories to check in parallel new/changed files
@@ -65,11 +75,11 @@ waitForConnectivity() {
   local attempts="5"
 
   if [ "${numWifiAdaptors}" -gt 1 ]; then
-    attempts="999" # Keep trying indefinitely
+    attempts="15" # Keep trying... more
   fi
   
   for ((i=1;i<=${attempts};i++)); do
-    if curl -s --connect-timeout 5 -I "${target}" | grep "^HTTP/" | awk '{print $2}' | egrep "200|302|301" >/dev/null; then
+    if curl -ks --connect-timeout 5 --max-time 60 -I "${target}" | grep "^HTTP/" | awk '{print $2}' | egrep "200|302|301" >/dev/null; then
       return 0
     fi
     sleep 1
@@ -93,7 +103,7 @@ connectToWifiNetwork() {
   local connected
 
   while (( attempt < 5 )); do
-    echo -n "Connecting to Wi-Fi '${ssid}' on ${wifiAdaptor}… "
+    echo -n "Connecting to Wi-Fi '${ssid}' on ${wifiAdaptor}... "
     connected=false
 
     case "${os}" in
@@ -103,7 +113,8 @@ connectToWifiNetwork() {
         fi
         ;;
       Linux)
-        if sudo nmcli device wifi connect "${ssid}" password "${password}" &>/dev/null; then
+        sudo nmcli device wifi rescan ifname "${wifiAdaptor}" >/dev/null 2>&1 # Refresh the wifi SSID list before we attempt to connect
+        if sudo nmcli device wifi connect "${ssid}" password "${password}" ifname "${wifiAdaptor}" &>/dev/null; then
           connected=true
         fi
         ;;
@@ -194,7 +205,7 @@ versionCheck() {
   local lv
   local cv
 
-  lv=$(curl -ks -o - https://raw.githubusercontent.com/iitggithub/ezshare_cpap/main/sync.sh 2>/dev/null | grep "^# VERSION=" | cut -f2 -d '=')
+  lv=$(curl --connect-timeout 20 --max-time 300 -ks -o - https://raw.githubusercontent.com/iitggithub/ezshare_cpap/main/sync.sh 2>/dev/null | grep "^# VERSION=" | cut -f2 -d '=')
   cv=$(grep "^# VERSION=" "${me}" 2>/dev/null | cut -f2 -d '=')
 
   if [ -z "${lv}" ]; then
@@ -207,7 +218,7 @@ versionCheck() {
 
   if [ "${lv}" -gt "${cv}" ]; then
     echo "Script update available. Auto-update from version ${cv} to ${lv} in progress..."
-    curl -o "${me}" https://raw.githubusercontent.com/iitggithub/ezshare_cpap/main/sync.sh
+    curl --connect-timeout 20 --max-time 300 -k -o "${me}" https://raw.githubusercontent.com/iitggithub/ezshare_cpap/main/sync.sh
     echo -e "${green}Done${reset}. Relaunching using ${me} ${args}"
     bash "${me}" "${args}"
     exit
@@ -229,21 +240,27 @@ getLastRunDate() {
     return 0
   fi
   
-  # Changed to use cut -f2- -d " " to allow for paths that contain a space
-  latestFile=$(find "${dataDir}" -mindepth 2 -type f ! -name ".DS_Store" -exec stat -f "%m %N" "{}" + 2>/dev/null | sort -nr 2>/dev/null | head -n 1 | cut -f2- -d " ")
+  case "${os}" in
+    Darwin)
+      # Changed to use cut -f2- -d " " to allow for paths that contain a space
+      latestFile=$(find "${dataDir}" -mindepth 2 -type f ! -name ".DS_Store" -exec stat -f "%m %N" "{}" + 2>/dev/null | sort -nr 2>/dev/null | head -n 1 | cut -f2- -d " ")
+      test -z "${latestFile}" && echo 0 && return 0 # DATALOG directory exists but there's no files. This is also a brand new sync.
 
-  # DATALOG directory exists but there's no files.
-  # This is also a brand new sync.
-  if [ -z "${latestFile}" ]; then
-    echo 0 # sync everything on the SD card
-    return 0
-  fi
+      # Get the last modified date
+      timestamp=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M:%S" "${latestFile}")
 
-  # Get the last modified date
-  timestamp=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M:%S" "${latestFile}")
+      # Convert the last modified date to seconds
+      date -j -f "%Y-%m-%d %H:%M:%S" "${timestamp}" +"%s"
+    ;;
+    Linux)
+      # Changed to use cut -f2- -d " " to allow for paths that contain a space
+      latestFile=$(find "${dataDir}" -mindepth 2 -type f ! -name '.DS_Store' -printf '%T@ %p\n' 2>/dev/null | sort -nr 2>/dev/null | head -n 1 | cut -f2- -d " ")
+      test -z "${latestFile}" && echo 0 && return 0 # DATALOG directory exists but there's no files. This is also a brand new sync.
 
-  # Convert the last modified date to seconds
-  date -j -f "%Y-%m-%d %H:%M:%S" "${timestamp}" +"%s"
+      # Return the last modified date in seconds
+      stat -c "%Y" "${latestFile}"
+    ;;
+  esac
 }
 
 # Stores date in seconds in the lastRunFile
@@ -295,8 +312,19 @@ fileSizeHasChanged() {
   local size="${1}"
   local file="${2}"
   local localFileSizeInBytes
+  local os
 
-  localFileSizeInBytes=$(stat -f%z "${file}")
+  os="$(uname)"
+
+  # get file size in bytes (OS‐specific)
+  case "${os}" in
+    Darwin)
+      localFileSizeInBytes=$(stat -f%z "${file}")
+    ;;
+    Linux)
+      localFileSizeInBytes=$(stat -c%s "${file}")
+    ;;
+  esac
 
   # if the number is divisible by 1024, do not round number up
   # else, round the number up to the nearest kilobyte
@@ -322,13 +350,13 @@ getLocalPath() {
   if [ "${type}" == "dir" ]; then
     # extracts the relative path by removing the "A:\" from the decoded link path
     # so A:\SETTINGS\Identification.crc becomes SETTINGS\Identification.crc
-    echo "${decodedPath}" | sed -e 's/dir?dir=A:\\//' | tr '\' '/'
+    echo "${decodedPath}" | sed -e 's|dir?dir=A:\\||' -e 's|\\|/|g'
   else
     # extracts the relative path from the decoded link ie:
     # http://192.168.4.1/download?file=SETTINGS\AGL.TGT
     # becomes
     # SETTINGS\AGL.TGT
-    directoryPath=$(dirname "$(echo "${decodedPath}" | cut -f2 -d '=' | tr '\' '/')")
+    directoryPath=$(dirname "$(echo "${decodedPath}" | cut -f2 -d '=' | sed 's|\\|/|g')")
 
     # The dirname command will return a . if the
     # file is in the root directory so just return name only
@@ -343,12 +371,24 @@ getLocalPath() {
 fileTimestampHasChanged() {
   local lastRunDateInSeconds="${1}"
   local remoteTimestamp="${2}"
+  local os
+
+  os=$(uname)
+
   # Convert date/time string from "2024- 6-29   12: 0: 0" to "2024-6-29  12:0:0"
   normalizedDate=$(echo "${remoteTimestamp}" | sed 's/ -/-/g; s/- /-/g; s/ :/:/g; s/: /:/g; s/  / /g')
+  
   # Use the normalized date/time string and convert it into seconds ie 1719626400
-  targetDateInSeconds=$(date -j -f "%Y-%m-%d %H:%M:%S" "${normalizedDate}" "+%s")
+  case "${os}" in
+    Darwin)
+      targetDateInSeconds=$(date -j -f "%Y-%m-%d %H:%M:%S" "${normalizedDate}" "+%s")
+    ;;
+    Linux)
+      targetDateInSeconds=$(date -d "${normalizedDate}" "+%s")
+    ;;
+  esac
 
-  if [ "${lastRunDateInSeconds}" -lt "${targetDateInSeconds}" ]; then
+  if (( lastRunDateInSeconds < targetDateInSeconds )); then
     return 0 # target has been modified since the last time the script was run
   fi
   return 1 # target hasn't been modified
@@ -393,11 +433,11 @@ findRemoteDirs() {
   local link
   local localPath
 
-  html=$(curl -s "$url" 2>/dev/null)
+  html=$(curl --connect-timeout 20 --max-time 300 -s "$url" 2>/dev/null)
   if [ -z "${html}" ]; then
     echo "Something went wrong executing the command below:" >>/dev/stderr
     echo >>/dev/stderr
-    echo "curl \"${url}\"" >>/dev/stderr
+    echo "curl --connect-timeout 20 --max-time 300 \"${url}\"" >>/dev/stderr
     echo >>/dev/stderr
     echo "Cannot process the url. Skipping..." >>/dev/stderr
     return
@@ -477,7 +517,7 @@ findFilesInDir() {
   test -f "${tmpHTMLFile}" && rm -f "${tmpHTMLFile}"
 
   # Download the contents of the remote directory and store in the tmpFile
-  curl -s -o "${tmpHTMLFile}" "${url}" 2>/dev/null
+  curl -s --connect-timeout 20 --max-time 300 -o "${tmpHTMLFile}" "${url}" 2>/dev/null
 
   if ${fastsyncEnabled}; then
     # If the contents of the directory hasn't changed, skip this directory.
@@ -570,7 +610,7 @@ downloadFiles() {
       url=$(echo "${line}" | cut -f1 -d ';')
       path=$(echo "${line}" | cut -f2 -d ';')
       echo "Downloading ${url} to ${sdCardDir}/${path}"
-      curl -# -o "${sdCardDir}/${path}" "${url}"
+      curl -# --connect-timeout 20 --max-time 300 -o "${sdCardDir}/${path}" "${url}"
     ) &
 
     # Limit the number of parallel jobs
@@ -610,12 +650,6 @@ createSleepDataZipFile() {
 
   # Remove the existing upload.zip file
   test -f "${uploadZipFile}" && rm -f "${uploadZipFile}"
-
-  # upload zip file has been copied to iCloud. Evict the local copy and remove the .icloud file
-  if [ -f "$(dirname "${uploadZipFile}")/.$(basename "${uploadZipFile}").icloud" ]; then
-    brctl evict "${uploadZipFile}"
-    rm -f "$(dirname "${uploadZipFile}")/.$(basename "${uploadZipFile}").icloud"
-  fi
 
   # Read each line from the input file
   while IFS= read -r line; do
@@ -712,7 +746,7 @@ generateSleepHQAccessToken() {
 
   # Example json output:
   # {"access_token":"access_token_string_value","token_type":"Bearer","expires_in":7200,"refresh_token":"refresh_token_string_value","scope":"read write","created_at":1720655289}
-  curl -s "${sleepHQAPIBaseURL}/oauth/token" "${params[@]}" 2>/dev/null | awk -F '[:,{}]' '{for(i=1;i<=NF;i++){if($i~/"access_token\"/){print $(i+1)}}}' | sed 's/["]*//g'
+  curl -ks --connect-timeout 20 --max-time 300 "${sleepHQAPIBaseURL}/oauth/token" "${params[@]}" 2>/dev/null | awk -F '[:,{}]' '{for(i=1;i<=NF;i++){if($i~/"access_token\"/){print $(i+1)}}}' | sed 's/["]*//g'
 }
 
 # Get the current SleepHQ team ID for the user
@@ -732,7 +766,7 @@ getSleepHQTeamID() {
 
   # Example json output:
   # {"data":{"id":1234,"email":"email@host.com","current_team_id":1234,"profile_photo_url":null,"owned_team_ids":[1234],"name":"My Name"}}
-  curl -s "${sleepHQAPIBaseURL}/api/v1/me" "${params[@]}" 2>/dev/null | awk -F '[:,{}]' '{for(i=1;i<=NF;i++){if($i~/"current_team_id\"/){print $(i+1)}}}' | sed 's/[^0-9]*//g'
+  curl -ks --connect-timeout 20 --max-time 300 "${sleepHQAPIBaseURL}/api/v1/me" "${params[@]}" 2>/dev/null | awk -F '[:,{}]' '{for(i=1;i<=NF;i++){if($i~/"current_team_id\"/){print $(i+1)}}}' | sed 's/[^0-9]*//g'
 }
 
 # Create a Sleep  HQ Import task
@@ -758,16 +792,27 @@ createImportTask() {
 
   # Example json output:
   # {"data":{"id":"1234567","type":"import","attributes":{"id":1234567,"team_id":1234,"name":null,"status":"uploading","file_size":null,"progress":0,"machine_id":null,"device_id":123456,"programatic":true,"failed_reason":null,"created_at":"2024-07-10 23:07:31 UTC","updated_at":"2024-07-10 23:07:31 UTC"},"relationships":{"files":{"data":[]}}}}
-  curl -s "${sleepHQAPIBaseURL}/api/v1/teams/${sleepHQTeamID}/imports" "${params[@]}" 2>/dev/null | awk -F '[:,{}]' '{for(i=1;i<=NF;i++){if($i~/"attributes\"/ && $(i+2)~/"id\"/){print $(i+3)}}}' | sed 's/[^0-9]*//g'
+  curl -ks --connect-timeout 20 --max-time 300 "${sleepHQAPIBaseURL}/api/v1/teams/${sleepHQTeamID}/imports" "${params[@]}" 2>/dev/null | awk -F '[:,{}]' '{for(i=1;i<=NF;i++){if($i~/"attributes\"/ && $(i+2)~/"id\"/){print $(i+3)}}}' | sed 's/[^0-9]*//g'
 }
 
 generateContentHash() {
   local uploadZipFileName="${1}"
+  local os
+
+  os=$(uname)
+
   # Generate content hash
   # Takes the contents of the file to be uploaded and appends "upload.zip"
   # which is the name of the file being uploaded to the end of the string.
   # Finally it performs an md5sum of the entire string
-  (cat "${uploadZipFileName}"; echo "${uploadZipFileName}") | md5 -q
+  case "${os}" in
+    Darwin)
+      (cat "${uploadZipFileName}"; echo "${uploadZipFileName}") | md5 -q
+    ;;
+    Linux)
+      (cat "${uploadZipFileName}"; echo "${uploadZipFileName}") | md5sum | awk '{print $1}'
+    ;;
+  esac
 }
 
 # Upload Zip file to Sleep HQ
@@ -794,7 +839,7 @@ uploadFileToSleepHQ() {
   params+=('-F')
   params+=("file=@${uploadZipFileName}")
 
-  curl -s "${sleepHQAPIBaseURL}/api/v1/imports/${sleepHQImportTaskID}/files" "${params[@]}" >/dev/null
+  curl -ks --connect-timeout 20 --max-time 300 "${sleepHQAPIBaseURL}/api/v1/imports/${sleepHQImportTaskID}/files" "${params[@]}" >/dev/null
 }
 
 # Instruct Sleep HQ to unpack the zip file and process the import
@@ -810,7 +855,7 @@ triggerDataImport() {
   params+=('-H')
   params+=("authorization: Bearer ${sleepHQAccessToken}")
 
-  curl -s -X 'POST' "${sleepHQAPIBaseURL}/api/v1/imports/${sleepHQImportTaskID}/process_files" "${params[@]}" >/dev/null
+  curl -ks --connect-timeout 20 --max-time 300 -X 'POST' "${sleepHQAPIBaseURL}/api/v1/imports/${sleepHQImportTaskID}/process_files" "${params[@]}" >/dev/null
 }
 
 # wait for upload to complete and report upload progress
@@ -836,7 +881,7 @@ monitorImportProgress() {
     fi
     # Example JSON output:
     # {"data":{"id":"1234567","type":"import","attributes":{"id":1234567,"team_id":1234,"name":null,"status":"complete","file_size":660936,"progress":100,"machine_id":12345,"device_id":12345,"programatic":true,"failed_reason":null,"created_at":"2024-07-10 22:49:20 UTC","updated_at":"2024-07-10 22:49:29 UTC"},"relationships":{"files":{"data":[{"id":"123456789","type":"imports/file"},{"id":"123456789","type":"imports/file"},{"id":"123456789","type":"imports/file"},{"id":"123456789","type":"imports/file"}]}}}}
-    progress=$(curl -s "${sleepHQAPIBaseURL}/api/v1/imports/${sleepHQImportTaskID}" "${params[@]}" 2>/dev/null | awk -F '[:,]' '{for(i=1;i<=NF;i++){if($i~/"progress"/){print $(i+1)}}}' | sed 's/[^0-9]*//g')
+    progress=$(curl -ks --connect-timeout 20 --max-time 300 "${sleepHQAPIBaseURL}/api/v1/imports/${sleepHQImportTaskID}" "${params[@]}" 2>/dev/null | awk -F '[:,]' '{for(i=1;i<=NF;i++){if($i~/"progress"/){print $(i+1)}}}' | sed 's/[^0-9]*//g')
     echo -ne "Progress: ${progress}% complete...\r"
     if [ "${prevProgress}" -eq "${progress}" ]; then
       if [ "${failCounter}" -eq 12 ]; then
@@ -862,13 +907,16 @@ monitorImportProgress() {
 ################################################################################################################################################
 ################################################################################################################################################
 
-# Make sure we only run the script on a mac
-# Not sure what would happen if you ran it on Linux
-# ... would probably break a lot of stuff..
-if [ "$(uname 2>/dev/null | grep -c Darwin)" -eq 0 ]; then
-  echo "This script can only be run on a Mac (Darwin)."
-  exit 1
-fi
+# Make sure we only run the script on a mac or Linux
+case "${os}" in
+  Darwin)
+  ;;
+  Linux)
+  ;;
+  *)
+    echo "This script can only be run on a Mac (Darwin) or Linux (Raspberry Pi OS etc)."
+    exit 1
+esac
 
 # Make sure we're not the root user
 # root user permissions are not necessary
@@ -888,10 +936,20 @@ overallStart="$(date +%s)"
 
 # This code exists solely to allow users to store
 # their sd card contents wherever they want
-keychainSDCardDir="$(security find-generic-password -ga "ezSharesdCardDir" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')"
-if [ -n "${keychainSDCardDir}" ]; then
-  sdCardDir="${keychainSDCardDir}"
-fi
+case "${os}" in
+  Darwin)
+    keychainSDCardDir="$(security find-generic-password -ga "ezSharesdCardDir" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')"
+    if [ -n "${keychainSDCardDir}" ]; then
+      sdCardDir="${keychainSDCardDir}"
+    fi
+  ;;
+  Linux)
+    # Load the value from the sdCard configuration file
+    if [ -f "${ezshareConfigDir}/ezSharesdCardDir" ]; then
+      sdCardDir="$(head -1 "${ezshareConfigDir}/ezSharesdCardDir")"
+    fi
+  ;;
+esac
 
 # Create the SD card directory if it doesn't exist
 # If the directory doesn't exist, it's either a first time user
@@ -907,7 +965,14 @@ if [ ! -d "${sdCardDir}" ]; then
   read -r answer
   if [ -n "${answer}" ]; then
     sdCardDir="${answer}"
-    security add-generic-password -T "/usr/bin/security" -U -a "ezSharesdCardDir" -s "ezShare" -w "${sdCardDir}"
+    case "${os}" in
+      Darwin)
+        security add-generic-password -T "/usr/bin/security" -U -a "ezSharesdCardDir" -s "ezShare" -w "${sdCardDir}"
+      ;;
+      Linux)
+        echo "${sdCardDir}" >"${ezshareConfigDir}/ezSharesdCardDir"
+      ;;
+    esac
   fi
   echo
   if [ ! -d "${sdCardDir}" ]; then
@@ -922,26 +987,62 @@ lastRunFile="${sdCardDir}/.sync_last_run_time" # stores the last time the script
 lockfile="${sdCardDir}/.sync.sh.lock" # A temporary file used to make sure only one instance of the script can be executed at a time
 
 #################################
+####### Linux Config Dir  #######
+#################################
+
+if [ "${os}" == "Linux" ]; then
+  test ! -d "${ezshareConfigDir}" && mkdir -m 700 -p "${ezshareConfigDir}"
+fi
+
+#################################
 ####### Lockfile creation #######
 #################################
 
-# Try to create a lock using shlock or exit if one already exists
-if ! shlock -p $$ -f "${lockfile}"; then
-  echo "Script is already running or you need to remove ${lockfile}."
-  exit 1
-fi
+case "${os}" in
+  Darwin)
+    # Try to create a lock using shlock or exit if one already exists
+    if ! shlock -p $$ -f "${lockfile}"; then
+      echo "Script is already running or you need to remove ${lockfile}."
+      exit 1
+    fi
+  ;;
+  Linux)
+    exec 200>"${lockfile}"
+    if ! flock -n 200; then
+      echo "Script is already running or you need to remove ${lockfile}."
+      exit 1
+    fi
+  ;;
+esac
 
 ############################
-## Wifi adaptor selection ##
+## Wifi adaptor discovery ##
 ############################
 
-wifiAdaptor="$(networksetup -listallhardwareports | egrep -A1 '802.11|Wi-Fi' | grep "Device" | awk '{print $2}' | sort -n)"
-numWifiAdaptors="$(echo "${wifiAdaptor}" | wc -l | awk '{print $1}')"
+case "${os}" in
+  Darwin)
+    wifiAdaptors="$(networksetup -listallhardwareports | egrep -A1 '802.11|Wi-Fi' | awk '/Device/ {print $2}' | sort -n)"
+    fallback="$(networksetup -listallhardwareports | egrep -A1 '802.11|Wi-Fi')"
+    ;;
+  Linux)
+    wifiAdaptors="$(
+      for iface in /sys/class/net/*; do
+        [[ -d "${iface}/wireless" ]] && basename "${iface}"
+      done
+    )"
+    fallback="$(ls /sys/class/net)"
+    ;;
+  *)
+    echo "Unsupported OS: ${os}" >&2
+    exit 1
+    ;;
+esac
 
-if [ "${numWifiAdaptors}" -eq 0 ]; then
-  echo "Couldn't identify a valid Wifi adaptor. Below are the wifi adaptors we found"
-  echo "using the command: \"networksetup -listallhardwareports | egrep -A1 '802.11|Wi-Fi'\""
-  networksetup -listallhardwareports | egrep -A1 '802.11|Wi-Fi'
+numWifiAdaptors=$(echo "${wifiAdaptors}" | grep -c .)
+
+if (( ${numWifiAdaptors} == 0 )); then
+  echo "Couldn't identify a valid Wi-Fi adaptor. Found these instead:"
+  echo "${fallback}"
   exit 1
 fi
 
@@ -951,11 +1052,32 @@ fi
 
 if [ "${numWifiAdaptors}" -eq 1 ]; then
   # Check to see if we can successfully pull WiFi Credentials
-  # from the users Login keychain.
-  ezShareWifiSSID="$(security find-generic-password -ga "ezShareWifiSSID" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')"
-  ezShareWiFiPassword="$(security find-generic-password -ga "ezShareWiFiPassword" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')"
-  homeWiFiSSID="$(security find-generic-password -ga "homeWiFiSSID" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')"
-  homeWiFiPassword="$(security find-generic-password -ga "homeWiFiPassword" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')"
+  case "${os}" in
+    Darwin)
+      wifiAdaptor="${wifiAdaptors}"
+      # from the users Login keychain.
+      ezShareWifiSSID="$(security find-generic-password -ga "ezShareWifiSSID" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')"
+      ezShareWiFiPassword="$(security find-generic-password -ga "ezShareWiFiPassword" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')"
+      homeWiFiSSID="$(security find-generic-password -ga "homeWiFiSSID" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')"
+      homeWiFiPassword="$(security find-generic-password -ga "homeWiFiPassword" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')"
+    ;;
+    Linux)
+      wifiAdaptor="${wifiAdaptors}"
+      # from config files
+      if [ -f "${ezshareConfigDir}/ezShareWifiSSID" ]; then
+        ezShareWifiSSID="$(head -1 "${ezshareConfigDir}/ezShareWifiSSID")"
+      fi
+      if [ -f "${ezshareConfigDir}/ezShareWiFiPassword" ]; then
+        ezShareWiFiPassword="$(head -1 "${ezshareConfigDir}/ezShareWiFiPassword")"
+      fi
+      if [ -f "${ezshareConfigDir}/homeWiFiSSID" ]; then
+        homeWiFiSSID="$(head -1 "${ezshareConfigDir}/homeWiFiSSID")"
+      fi
+      if [ -f "${ezshareConfigDir}/homeWiFiPassword" ]; then
+        homeWiFiPassword="$(head -1 "${ezshareConfigDir}/homeWiFiPassword")"
+      fi
+    ;;
+  esac
 
   # If any of the credentials do not exist
   # prompt the user to create them.
@@ -963,10 +1085,9 @@ if [ "${numWifiAdaptors}" -eq 1 ]; then
      [ -z "${ezShareWiFiPassword}" ] ||
      [ -z "${homeWiFiSSID}" ] ||
      [ -z "${homeWiFiPassword}" ]; then
-    echo "Couldn't find WiFi details in your Login keychain. Setup process will"
+    echo "Couldn't find WiFi details saved anywhere. Setup process will"
     echo "now begin. Press enter to accept defaults if there are any."
-    echo "Please note you may need to enter your password to make changes to"
-    echo "your Login keychain."
+    echo "Please note you may need to enter your password to make changes"
     echo
     echo -n "Please enter the WiFi SSID of the ezShare Wifi Card (Default: 'ez Share'): "
     read -r ezShareWifiSSID
@@ -986,11 +1107,22 @@ if [ "${numWifiAdaptors}" -eq 1 ]; then
       echo -n "Please enter the WiFi password for your home WiFi network: "
       read -r homeWiFiPassword
     done
-    # Create the necessary entries in the users Login keychain 
-    security add-generic-password -T "/usr/bin/security" -U -a "ezShareWifiSSID" -s "ezShare" -w "${ezShareWifiSSID}"
-    security add-generic-password -T "/usr/bin/security" -U -a "ezShareWiFiPassword" -s "ezShare" -w "${ezShareWiFiPassword}"
-    security add-generic-password -T "/usr/bin/security" -U -a "homeWiFiSSID" -s "ezShare" -w "${homeWiFiSSID}"
-    security add-generic-password -T "/usr/bin/security" -U -a "homeWiFiPassword" -s "ezShare" -w "${homeWiFiPassword}"
+  case "${os}" in
+    Darwin)
+      # Create the necessary entries in the users Login keychain 
+      security add-generic-password -T "/usr/bin/security" -U -a "ezShareWifiSSID" -s "ezShare" -w "${ezShareWifiSSID}"
+      security add-generic-password -T "/usr/bin/security" -U -a "ezShareWiFiPassword" -s "ezShare" -w "${ezShareWiFiPassword}"
+      security add-generic-password -T "/usr/bin/security" -U -a "homeWiFiSSID" -s "ezShare" -w "${homeWiFiSSID}"
+      security add-generic-password -T "/usr/bin/security" -U -a "homeWiFiPassword" -s "ezShare" -w "${homeWiFiPassword}"
+    ;;
+    Linux)
+      # In the relevant configuration files
+      echo "${ezShareWifiSSID}" >"${ezshareConfigDir}/ezShareWifiSSID"
+      echo "${ezShareWiFiPassword}" >"${ezshareConfigDir}/ezShareWiFiPassword"
+      echo "${homeWiFiSSID}" >"${ezshareConfigDir}/homeWiFiSSID"
+      echo "${homeWiFiPassword}" >"${ezshareConfigDir}/homeWiFiPassword"
+    ;;
+  esac
   fi
 fi
 
@@ -999,9 +1131,26 @@ fi
 #######################################
 
 # Sleep HQ Upload Credentials
-sleepHQClientUID="$(security find-generic-password -ga "sleepHQClientUID" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')"
-sleepHQClientSecret="$(security find-generic-password -ga "sleepHQClientSecret" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')"
-sleepHQDeviceID="$(security find-generic-password -ga "sleepHQDeviceID" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')"
+case "${os}" in
+  Darwin)
+    # from the users Login keychain.
+    sleepHQClientUID="$(security find-generic-password -ga "sleepHQClientUID" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')"
+    sleepHQClientSecret="$(security find-generic-password -ga "sleepHQClientSecret" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')"
+    sleepHQDeviceID="$(security find-generic-password -ga "sleepHQDeviceID" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')"
+  ;;
+  Linux)
+    # from config files
+    if [ -f "${ezshareConfigDir}/sleepHQClientUID" ]; then
+      sleepHQClientUID="$(head -1 "${ezshareConfigDir}/sleepHQClientUID")"
+    fi
+    if [ -f "${ezshareConfigDir}/sleepHQClientSecret" ]; then
+      sleepHQClientSecret="$(head -1 "${ezshareConfigDir}/sleepHQClientSecret")"
+    fi
+    if [ -f "${ezshareConfigDir}/sleepHQDeviceID" ]; then
+      sleepHQDeviceID="$(head -1 "${ezshareConfigDir}/sleepHQDeviceID")"
+    fi
+  ;;
+esac
 
 # If any of the credentials do not exist
 # it's assumed that they've never been asked to create them
@@ -1025,17 +1174,46 @@ if [ -z "${sleepHQClientUID}" ] ||
         read -r sleepHQClientSecret
       done
 
-      # Create the necessary entries in the users Login keychain. 
-      security add-generic-password -T "/usr/bin/security" -U -a "sleepHQClientUID" -s "ezShare" -w "${sleepHQClientUID}"
-      security add-generic-password -T "/usr/bin/security" -U -a "sleepHQClientSecret" -s "ezShare" -w "${sleepHQClientSecret}"
+      # Create the necessary entries in the users Login keychain.
+      case "${os}" in
+        Darwin)
+          # Create the necessary entries in the users Login keychain 
+          security add-generic-password -T "/usr/bin/security" -U -a "sleepHQClientUID" -s "ezShare" -w "${sleepHQClientUID}"
+          security add-generic-password -T "/usr/bin/security" -U -a "sleepHQClientSecret" -s "ezShare" -w "${sleepHQClientSecret}"
+          if [ "${sleepHQClientUID}" == "$(security find-generic-password -ga "sleepHQClientUID" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')" ] &&
+             [ "${sleepHQClientSecret}" == "$(security find-generic-password -ga "sleepHQClientSecret" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')" ]; then
+            echo
+            echo "Sleep HQ Client UID ( sleepHQClientUID ) and Client Secret ( sleepHQClientSecret ) are now saved to your keychain."
+            echo
+            else
+            echo
+            echo "An error occurred while trying to save your Sleep HQ credentials. Script execution will still continue."
+            echo
+          fi
 
-      # Make sure the Client UID and Client Secret were added to the keychain
-      if [ "${sleepHQClientUID}" == "$(security find-generic-password -ga "sleepHQClientUID" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')" ] &&
-         [ "${sleepHQClientSecret}" == "$(security find-generic-password -ga "sleepHQClientSecret" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')" ]; then
-        echo
-        echo "Sleep HQ Client UID ( sleepHQClientUID ) and Client Secret ( sleepHQClientSecret ) are now saved to your keychain."
-        echo
+        ;;
+        Linux)
+          # In the relevant configuration files
+          echo "${sleepHQClientUID}" >"${ezshareConfigDir}/sleepHQClientUID"
+          echo "${sleepHQClientSecret}" >"${ezshareConfigDir}/sleepHQClientSecret"
 
+          if grep -Fxq "${sleepHQClientUID}" "${ezshareConfigDir}/sleepHQClientUID" && \
+             grep -Fxq "${sleepHQClientSecret}" "${ezshareConfigDir}/sleepHQClientSecret"; then
+            echo
+            echo "Sleep HQ Client UID ( sleepHQClientUID ) and Client Secret ( sleepHQClientSecret ) have been successfully saved."
+            echo
+            else
+            echo
+            echo "An error occurred while trying to save your Sleep HQ credentials. Script execution will still continue."
+            echo
+          fi
+        ;;
+      esac
+
+      if [ "${sleepHQClientUID}" != "false" ] &&
+         [ -n "${sleepHQClientUID}" ] &&
+         [ "${sleepHQClientSecret}" != "false" ] &&
+         [ -n "${sleepHQClientSecret}" ]; then
         echo
         echo -ne "Testing Sleep HQ API Credentials..."
         if [ -z "${sleepHQAccessToken}" ]; then
@@ -1054,10 +1232,10 @@ if [ -z "${sleepHQClientUID}" ] ||
           echo "Debug output for troubleshooting is shownn below: "
           echo
           echo "Command:"
-          echo "curl -X 'POST' \"${sleepHQLoginURL}\""
+          echo "curl --connect-timeout 20 --max-time 300 -X 'POST' \"${sleepHQLoginURL}\""
           echo
           echo -n "Output: "
-          curl -X 'POST' "${sleepHQLoginURL}"
+          curl -k --connect-timeout 20 --max-time 300 -X 'POST' "${sleepHQLoginURL}"
           echo
           echo
           echo "Cannot continue... Rolling back Sleep HQ configuration and exiting..."
@@ -1071,7 +1249,7 @@ if [ -z "${sleepHQClientUID}" ] ||
         # Ask the user to provide their device type
         echo -e "\nWhat kind of CPAP device are you using with automated uploads? Enter an ID from the list below: \n"
 
-        curl -s "${sleepHQAPIBaseURL}/api/v1/devices" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}" | awk '
+        curl -ks --connect-timeout 20 --max-time 300 "${sleepHQAPIBaseURL}/api/v1/devices" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}" | awk '
           function json_value(key) {
               match($0, "\"" key "\": *\"[^\"]*\"")
               value = substr($0, RSTART, RLENGTH)
@@ -1101,12 +1279,21 @@ if [ -z "${sleepHQClientUID}" ] ||
           }'
         echo -ne "\nDevice ID: "
         read -r sleepHQDeviceID
-        security add-generic-password -T "/usr/bin/security" -U -a "sleepHQDeviceID" -s "ezShare" -w "${sleepHQDeviceID}"
-
-        if [ "${sleepHQDeviceID}" == "$(security find-generic-password -ga "sleepHQDeviceID" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')" ]; then
-          echo
-          echo "Sleep HQ Device ID successfully added to your keychain."
-        fi
+        case "${os}" in
+          Darwin)
+            # Create the necessary entries in the users Login keychain 
+            security add-generic-password -T "/usr/bin/security" -U -a "sleepHQDeviceID" -s "ezShare" -w "${sleepHQDeviceID}"
+            if [ "${sleepHQDeviceID}" == "$(security find-generic-password -ga "sleepHQDeviceID" 2>&1 | grep password | cut -f2- -d '"' | sed -e 's/^"//' -e 's/"$//')" ]; then
+              echo
+              echo "Sleep HQ Device ID successfully added to your keychain."
+            fi
+          ;;
+          Linux)
+            # In the relevant configuration files
+            echo "${sleepHQDeviceID}" >"${ezshareConfigDir}/sleepHQDeviceID"
+            grep -Fxq "${sleepHQDeviceID}" "${ezshareConfigDir}/ezShareWifiSSID" && echo "Sleep HQ Device ID successfully saved to ${ezshareConfigDir}/sleepHQDeviceID."
+          ;;
+        esac
         echo
         echo "Sleep HQ Automatic uploads are now enabled."
         sleepHQuploadsEnabled=true
@@ -1119,14 +1306,22 @@ if [ -z "${sleepHQClientUID}" ] ||
     [nN][oO]|[nN])
       # Set the sleepHQClientUID and sleepHQClientSecret values to false
       # When the script starts, it will skip asking the user if they want to
-      # configure Sleep HQ automatic uploads because there is a value set for
-      # both sleepHQClientUID and sleepHQClientSecret in the users keychain
+      # configure Sleep HQ automatic uploads because there is a value set
       sleepHQClientUID="false"
       sleepHQClientSecret="false"
       sleepHQDeviceID="false"
-      security add-generic-password -T "/usr/bin/security" -U -a "sleepHQClientUID" -s "ezShare" -w "${sleepHQClientUID}" # set the value to false
-      security add-generic-password -T "/usr/bin/security" -U -a "sleepHQClientSecret" -s "ezShare" -w "${sleepHQClientSecret}" # set the value to false
-      security add-generic-password -T "/usr/bin/security" -U -a "sleepHQDeviceID" -s "ezShare" -w "${sleepHQDeviceID}" # set the value to false
+      case "${os}" in
+        Darwin)
+          security add-generic-password -T "/usr/bin/security" -U -a "sleepHQClientUID" -s "ezShare" -w "${sleepHQClientUID}" # set the value to false
+          security add-generic-password -T "/usr/bin/security" -U -a "sleepHQClientSecret" -s "ezShare" -w "${sleepHQClientSecret}" # set the value to false
+          security add-generic-password -T "/usr/bin/security" -U -a "sleepHQDeviceID" -s "ezShare" -w "${sleepHQDeviceID}" # set the value to false
+        ;;
+        Linux)
+          echo "false" >"${ezshareConfigDir}/sleepHQClientUID"
+          echo "false" >"${ezshareConfigDir}/sleepHQClientSecret"
+          echo "false" >"${ezshareConfigDir}/sleepHQDeviceID"
+        ;;
+      esac
     ;;
   esac
 fi
@@ -1165,28 +1360,53 @@ for arg in ${@}; do
     o2RingSyncEnabled=false
     ;;
     "--remove-sleephq")
-      output="$(security -q delete-generic-password -a sleepHQClientUID 2>&1)"
-      verifyKeychainAction delete sleepHQClientUID $? "${output}"
-      output="$(security -q delete-generic-password -a sleepHQClientSecret 2>&1)"
-      verifyKeychainAction delete sleepHQClientSecret $? "${output}"
-      output="$(security -q delete-generic-password -a sleepHQDeviceID 2>&1)"
-      verifyKeychainAction delete sleepHQDeviceID $? "${output}"
+      case "${os}" in
+        Darwin)
+          output="$(security -q delete-generic-password -a sleepHQClientUID 2>&1)"
+          verifyKeychainAction delete sleepHQClientUID $? "${output}"
+          output="$(security -q delete-generic-password -a sleepHQClientSecret 2>&1)"
+          verifyKeychainAction delete sleepHQClientSecret $? "${output}"
+          output="$(security -q delete-generic-password -a sleepHQDeviceID 2>&1)"
+          verifyKeychainAction delete sleepHQDeviceID $? "${output}"
+        ;;
+        Linux)
+          test -f "${ezshareConfigDir}/sleepHQClientUID" && rm -vf "${ezshareConfigDir}/sleepHQClientUID"
+          test -f "${ezshareConfigDir}/sleepHQClientSecret" && rm -vf "${ezshareConfigDir}/sleepHQClientSecret"
+          test -f "${ezshareConfigDir}/sleepHQDeviceID" && rm -vf "${ezshareConfigDir}/sleepHQDeviceID"
+        ;;
+      esac
       echo
       exit 0
     ;;
     "--remove-ezshare")
-      output="$(security -q delete-generic-password -a ezShareWifiSSID 2>&1)"
-      verifyKeychainAction delete ezShareWifiSSID $? "${output}"
-      output="$(security -q delete-generic-password -a ezShareWiFiPassword 2>&1)"
-      verifyKeychainAction delete ezShareWiFiPassword $? "${output}"
+      case "${os}" in
+        Darwin)
+          output="$(security -q delete-generic-password -a ezShareWifiSSID 2>&1)"
+          verifyKeychainAction delete ezShareWifiSSID $? "${output}"
+          output="$(security -q delete-generic-password -a ezShareWiFiPassword 2>&1)"
+          verifyKeychainAction delete ezShareWiFiPassword $? "${output}"
+        ;;
+        Linux)
+          test -f "${ezshareConfigDir}/ezShareWifiSSID" && rm -vf "${ezshareConfigDir}/ezShareWifiSSID"
+          test -f "${ezshareConfigDir}/ezShareWiFiPassword" && rm -vf "${ezshareConfigDir}/ezShareWiFiPassword"
+        ;;
+      esac
       echo
       exit 0
     ;;
     "--remove-home")
-      output="$(security -q delete-generic-password -a homeWiFiSSID 2>&1)"
-      verifyKeychainAction delete homeWiFiSSID $? "${output}"
-      output="$(security -q delete-generic-password -a homeWiFiPassword 2>&1)"
-      verifyKeychainAction delete homeWiFiPassword $? "${output}"
+      case "${os}" in
+        Darwin)
+          output="$(security -q delete-generic-password -a homeWiFiSSID 2>&1)"
+          verifyKeychainAction delete homeWiFiSSID $? "${output}"
+          output="$(security -q delete-generic-password -a homeWiFiPassword 2>&1)"
+          verifyKeychainAction delete homeWiFiPassword $? "${output}"
+        ;;
+        Linux)
+          test -f "${ezshareConfigDir}/homeWiFiSSID" && rm -vf "${ezshareConfigDir}/homeWiFiSSID"
+          test -f "${ezshareConfigDir}/homeWiFiPassword" && rm -vf "${ezshareConfigDir}/homeWiFiPassword"
+        ;;
+      esac
       echo
       exit 0
     ;;
@@ -1197,8 +1417,15 @@ for arg in ${@}; do
       exit 0
     ;;
     "--reset-sd")
-      output="$(security -q delete-generic-password -a ezSharesdCardDir 2>&1)"
-      verifyKeychainAction delete ezSharesdCardDir $? "${output}"
+      case "${os}" in
+        Darwin)
+          output="$(security -q delete-generic-password -a ezSharesdCardDir 2>&1)"
+          verifyKeychainAction delete ezSharesdCardDir $? "${output}"
+        ;;
+        Linux)
+          test -f "${ezshareConfigDir}/ezSharesdCardDir" && rm -vf "${ezshareConfigDir}/ezSharesdCardDir"
+        ;;
+      esac
       echo
       exit 0
     ;;
@@ -1213,7 +1440,14 @@ for arg in ${@}; do
     exit 0
     ;;
     "--connection-check")
-    open -a safari https://youtu.be/dQw4w9WgXcQ?si=ciWPSSKqphW4gkvz
+      case "${os}" in
+        Darwin)
+          open -a safari https://youtu.be/dQw4w9WgXcQ?si=ciWPSSKqphW4gkvz
+        ;;
+        Linux)
+          nc towel.blinkenlights.nl 23
+        ;;
+      esac
     exit 0
     ;;
     "-h"|"--help")
@@ -1286,7 +1520,20 @@ if ${sleepDataSyncEnabled}; then
 
   lastRunDateInSeconds=$(getLastRunTimestamp "${lastRunFile}" "${sdCardDir}/DATALOG")
   if [ "${lastRunDateInSeconds}" -gt 0 ]; then
-    echo -e "\nLast successful SD Card synchronization: $(date -r "${lastRunDateInSeconds}" +"%Y-%m-%d %H:%M:%S")\n"
+    case "${os}" in
+      Darwin)
+        lastSync=$(date -r "${lastRunDateInSeconds}" +"%Y-%m-%d %H:%M:%S")
+        ;;
+      Linux)
+        lastSync=$(date -d "@${lastRunDateInSeconds}" +"%Y-%m-%d %H:%M:%S")
+        ;;
+      *)
+        echo "Unsupported OS: ${os}" >&2
+        exit 1
+        ;;
+    esac
+
+    echo -e "\nLast successful SD Card synchronization: "${lastSync}"\n"
   else
     echo -e "\nCould not reliably determine the last time a successful"
     echo "SD card synchronization was performed. This is usually because"
@@ -1338,7 +1585,7 @@ if ${sleepDataSyncEnabled}; then
   wait
 
   end="$(date +%s)"
-  timeTaken="$(echo "${end}-${start}" | bc)"
+  timeTaken=$(( end - start ))
   echo -e " ${green}DONE!${reset} Time taken: ${timeTaken} seconds."
 
   start="$(date +%s)"
@@ -1354,7 +1601,7 @@ if ${sleepDataSyncEnabled}; then
   wait
 
   end="$(date +%s)"
-  timeTaken="$(echo "${end}-${start}" | bc)"
+  timeTaken=$(( end - start ))
   echo -e "\nDone searching SD card for files to download. Time taken: ${timeTaken} seconds."
 
   # Transfer list file is only populated when it's actually identified files to download
@@ -1377,7 +1624,7 @@ if ${sleepDataSyncEnabled}; then
     numFiles="$(cat ${transferListFile} | wc -l | awk '{print $1}')"
     downloadFiles "${maxParallelDownloads}" "${transferListFile}" "${sdCardDir}"
     end="$(date +%s)"
-    timeTaken="$(echo "${end}-${start}" | bc)"
+    timeTaken=$(( end - start ))
     echo -e "\nSD card sync complete. Time taken: ${timeTaken} seconds. Files downloaded: ${numFiles} files.\n"
     ezShareSyncInProgress=0
     
@@ -1403,9 +1650,17 @@ if ${sleepDataSyncEnabled}; then
       # If uploads to sleep HQ are enabled, create the zip file and upload it.
       if ${sleepHQuploadsEnabled}; then
         start="$(date +%s)"
+
+        # upload zip file has been copied to iCloud. Evict the local copy and remove the .icloud file
+        icloudPlaceholderFile="${sdCardDir}/.${uploadZipFileName}.icloud"
+        if [[ "${os}" == "Darwin" && -f "${icloudPlaceholderFile}" ]]; then
+          brctl evict "${icloudPlaceholderFile}"
+          rm -f "${icloudPlaceholderFile}"
+        fi
+
         createSleepDataZipFile "${uploadZipFile}" "${transferListFile}"
         end="$(date +%s)"
-        timeTaken="$(echo "${end}-${start}" | bc)"
+        timeTaken=$(( end - start ))
         echo -e "\nZip file creation complete. Time taken: ${timeTaken} seconds.\n"
 
         # Disable trapping because API errors will cause the script to terminate prematurely with no explanation.
@@ -1428,9 +1683,9 @@ if ${sleepDataSyncEnabled}; then
             echo "web browser."
             echo -e "\nDebug output for troubleshooting is shown below: "
             echo -e "\nCommand:"
-            echo "curl -X 'POST' \"${sleepHQLoginURL}\""
+            echo "curl --connect-timeout 20 --max-time 300 -X 'POST' \"${sleepHQLoginURL}\""
             echo -ne "\nOutput: "
-            curl -X 'POST' "${sleepHQLoginURL}"
+            curl -k --connect-timeout 20 --max-time 300 -X 'POST' "${sleepHQLoginURL}"
             echo -e "\n\nCannot continue with upload... exiting now..."
             exit 1
           else
@@ -1446,9 +1701,9 @@ if ${sleepDataSyncEnabled}; then
             if ! [[ ${sleepHQTeamID} =~ ^[0-9]+$ ]]; then
               echo -e " ${red}FAILED!${reset}\n\nFailed to obtain your Sleep HQ Team ID. Debug output for troubleshooting is shownn below: "
               echo -e "\nCommand:"
-              echo "curl \"${sleepHQAPIBaseURL}/api/v1/me\" -H 'accept: application/vnd.api+json' -H \"authorization: Bearer ${sleepHQAccessToken}\""
+              echo "curl --connect-timeout 20 --max-time 300 \"${sleepHQAPIBaseURL}/api/v1/me\" -H 'accept: application/vnd.api+json' -H \"authorization: Bearer ${sleepHQAccessToken}\""
               echo -ne "\nOutput: "
-              curl "${sleepHQAPIBaseURL}/api/v1/me" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}"
+              curl -k --connect-timeout 20 --max-time 300 "${sleepHQAPIBaseURL}/api/v1/me" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}"
               echo -e "\nCannot continue with upload... exiting now..."
               exit 1
             fi
@@ -1464,9 +1719,9 @@ if ${sleepDataSyncEnabled}; then
         if ! [[ ${sleepHQImportTaskID} =~ ^[0-9]+$ ]]; then
           echo -e " ${red}FAILED!${reset}\n\nFailed to generate an Import Task ID. Debug output for troubleshooting is shownn below: \n"
           echo "Command:"
-          echo -e "curl -X 'POST' \"${sleepHQImportTaskURL}\" -H 'accept: application/vnd.api+json' -H \"authorization: Bearer ${sleepHQAccessToken}\"\n"
+          echo -e "curl --connect-timeout 20 --max-time 300 -X 'POST' \"${sleepHQImportTaskURL}\" -H 'accept: application/vnd.api+json' -H \"authorization: Bearer ${sleepHQAccessToken}\"\n"
           echo -n "Output: "
-          curl -X 'POST' "${sleepHQImportTaskURL}" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}"
+          curl -k --connect-timeout 20 --max-time 300 -X 'POST' "${sleepHQImportTaskURL}" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}"
           echo -e "\n\nCannot continue with upload... exiting now..."
           exit 1
         else
@@ -1497,7 +1752,7 @@ if ${sleepDataSyncEnabled}; then
         trap - INT TERM EXIT
 
         end="$(date +%s)"
-        timeTaken="$(echo "${end}-${start}" | bc)"
+        timeTaken=$(( end - start ))
         echo -e "\nUpload to Sleep HQ complete. Time taken: ${timeTaken} seconds.\n"
       fi
     fi
@@ -1510,7 +1765,14 @@ if ${o2RingSyncEnabled} && ${sleepHQuploadsEnabled}; then
 
     # Change the device ID to the "O2 Ring"
     sleepHQDeviceID="${o2RingDeviceID}"
-    
+
+    # upload zip file has been copied to iCloud. Evict the local copy and remove the .icloud file
+    icloudPlaceholderFile="${sdCardDir}/.${uploadZipFileName}.icloud"
+    if [[ "${os}" == "Darwin" && -f "${icloudPlaceholderFile}" ]]; then
+      brctl evict "${icloudPlaceholderFile}"
+      rm -f "${icloudPlaceholderFile}"
+    fi
+
     # Create a zip archive of the csv file(s)
     createO2RingDataZipFile "${uploadZipFile}"
 
@@ -1532,9 +1794,9 @@ if ${o2RingSyncEnabled} && ${sleepHQuploadsEnabled}; then
         echo "web browser."
         echo -e "\nDebug output for troubleshooting is shownn below: "
         echo -e "\nCommand:"
-        echo "curl -X 'POST' \"${sleepHQLoginURL}\""
+        echo "curl --connect-timeout 20 --max-time 300 -X 'POST' \"${sleepHQLoginURL}\""
         echo -ne "\nOutput: "
-        curl -X 'POST' "${sleepHQLoginURL}"
+        curl -k --connect-timeout 20 --max-time 300 -X 'POST' "${sleepHQLoginURL}"
         echo -e "\n\nCannot continue with upload... exiting now..."
         exit 1
       else
@@ -1550,9 +1812,9 @@ if ${o2RingSyncEnabled} && ${sleepHQuploadsEnabled}; then
       if ! [[ ${sleepHQTeamID} =~ ^[0-9]+$ ]]; then
         echo -e " ${red}FAILED!${reset}\n\nFailed to obtain your Sleep HQ Team ID. Debug output for troubleshooting is shown below: "
         echo -e "\nCommand:"
-        echo "curl \"${sleepHQAPIBaseURL}/api/v1/me\" -H 'accept: application/vnd.api+json' -H \"authorization: Bearer ${sleepHQAccessToken}\""
+        echo "curl --connect-timeout 20 --max-time 300 \"${sleepHQAPIBaseURL}/api/v1/me\" -H 'accept: application/vnd.api+json' -H \"authorization: Bearer ${sleepHQAccessToken}\""
         echo -ne "\nOutput: "
-        curl "${sleepHQAPIBaseURL}/api/v1/me" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}"
+        curl -k --connect-timeout 20 --max-time 300 "${sleepHQAPIBaseURL}/api/v1/me" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}"
         echo -e "\nCannot continue with upload... exiting now..."
         exit 1
       fi
@@ -1567,9 +1829,9 @@ if ${o2RingSyncEnabled} && ${sleepHQuploadsEnabled}; then
     if ! [[ ${sleepHQImportTaskID} =~ ^[0-9]+$ ]]; then
       echo -e " ${red}FAILED!${reset}\n\nFailed to generate an Import Task ID. Debug output for troubleshooting is shown below: \n"
       echo "Command:"
-      echo -e "curl -X 'POST' \"${sleepHQImportTaskURL}\" -H 'accept: application/vnd.api+json' -H \"authorization: Bearer ${sleepHQAccessToken}\"\n"
+      echo -e "curl --connect-timeout 20 --max-time 300 -X 'POST' \"${sleepHQImportTaskURL}\" -H 'accept: application/vnd.api+json' -H \"authorization: Bearer ${sleepHQAccessToken}\"\n"
       echo -n "Output: "
-      curl -X 'POST' "${sleepHQImportTaskURL}" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}"
+      curl -k --connect-timeout 20 --max-time 300 -X 'POST' "${sleepHQImportTaskURL}" -H 'accept: application/vnd.api+json' -H "authorization: Bearer ${sleepHQAccessToken}"
       echo -e "\n\nCannot continue with upload... exiting now..."
       exit 1
     else
@@ -1598,7 +1860,7 @@ if ${o2RingSyncEnabled} && ${sleepHQuploadsEnabled}; then
 fi
 
 overallEnd="$(date +%s)"
-overallTimeTaken="$(echo "${overallEnd}-${overallStart}" | bc)"
+overallTimeTaken=$(( overallEnd - overallStart ))
 
 # Remove the lock file if it exists
 if [ -f "${lockfile}" ]; then

@@ -1,6 +1,6 @@
 # ezshare_cpap
 
-This is a Mac OSX compatible bash script which is used to synchronize sleep data to your mac via an Ezshare Wifi SD card. It can also be used to automate the upload of your data to Sleep HQ.
+A Sleep HQ Magic Uploader and Oscar data downloader for both Mac OSX AND Linux (Raspberry Pi OS) written purely in bash scripting. Download the script and just run it! This is used to synchronize sleep data from your Resmed Airsense 10/11 to your mac or Linux server via an Ezshare Wifi SD card. It can also be used to automate the upload of your data to Sleep HQ.
 
 The script connects to the EZ Share WiFi SD card and synchronizes the data to a folder on your desktop called SD\_Card.
 
@@ -8,17 +8,17 @@ The script connects to the EZ Share WiFi SD card and synchronizes the data to a 
 
 ### PAP Compatibility
 
-If all you're looking to do is synchronize the contents of the SD card with your mac (for review in Oscar etc), then the script will work for both the Airsense 10 and 11 machines as the directory structure on both machines are the same.
+If all you're looking to do is synchronize the contents of the SD card with your mac/Linux server (for review in Oscar etc), then the script will work for both the Airsense 10 and 11 machines as the directory structure on both machines are the same.
 
 For uploading of data to Sleep HQ however, the script has only been tested against the Airsense 10. It has not been confirmed whether it works with the Resmed Airsense 11 but the Identification.json and JOURNAL.JNL files are automatically included in the upload.zip file if they're present in the SD_Card directory.
 
 ### Credentials securely stored in your Keychain
 
-The script doesn't store any WiFi credentials in the script itself or on the filesystem. Instead, it will store them in your Login Keychain. When you first run the script, it will prompt you for the WiFi SSID and Password for both the Ez Share SD card, and your home WiFi network. Once these details are saved in your Keychain, you don't have to enter them again.
+The script doesn't store any WiFi credentials in the script itself or on the filesystem. Instead, it will store them in your Login Keychain (Mac) or $HOME/.ezshare (Linux). When you first run the script, it will prompt you for the WiFi SSID and Password for both the Ez Share SD card, and your home WiFi network. Once these details are saved, you don't have to enter them again.
 
 ### Sleep HQ integration
 
-The script can be configured to automatically upload your data to Sleep HQ for review. The script will perform the upload provided that there is new sleep data since the last time the script was run.
+The script can be configured to automatically upload your data to Sleep HQ for review. The script will perform the upload provided that there is new sleep data since the last time the script was run. Simply changing settings is not enough to trigger an upload to Sleep HQ. There needs to be new sleep data recorded in order for an upload to be triggered.
 
 ### Automatic updates
 
@@ -57,7 +57,7 @@ If you have existing data in your SD_Card directory and would like to move it, s
 
 If you have more than one wifi adapter, the script will assume that you're using one of them to connect to the ezshare wifi SD card. It will no longer switch wifi networks. Should you disconnect the USB wifi adapter, normal functionality is restored and wifi switching is re-enabled automatically.
 
-This means it's now possible to turn a mac into a magic uploader! Simply run the script every 10 to 15 minutes and it'll upload new sleep data to Sleep HQ!
+Simply run the script every 10 to 15 minutes and it'll upload new sleep data to Sleep HQ without disconnecting from the local network.
 
 If you want to know how to enable it, see the FAQ section for more information.
 
@@ -94,7 +94,7 @@ That's it. The script is ready to use. The script will collect your WiFi details
 
 ### Performing an initial sync
 
-If you've got a lot of data on your SD card already, it's significantly quicker to connect your SD card directly to your mac and copy the contents of the SD Card into the SD_Card folder on your desktop. Once an initial sync has been performed subsequent executions will be much faster.
+If you've got a lot of data on your SD card already, it's significantly quicker to connect your SD card directly and copy the contents of the SD Card into the SD_Card folder on your desktop. Once an initial sync has been performed subsequent executions will be much faster.
 
 1. Remove the SD Card from your CPAP device
 2. Connect it to your computer
@@ -213,7 +213,7 @@ Note that X should be a number equal to the number of parallel downloads you'd l
 
 ### I deleted files in a directory, Why are they not being downloaded again?
 
-The script keeps track of the contents of the SD card locally on the mac. In each directory there is a hidden html file (such as .SETTINGS.html in the SETTINGS directory). You will need to remove the file to force the directory to be checked.
+The script keeps track of the contents of the SD card locally. In each directory there is a hidden html file (such as .SETTINGS.html in the SETTINGS directory). You will need to remove the file to force the directory to be checked.
 
 ```
 rm -f /path/to/hidden/file
@@ -227,9 +227,63 @@ OR you can simply run the script with the --full-sync option which checks each f
 
 ### How do i setup multiple wifi adapters?
 
+#### Linux
+
+For Linux, it's significantly easier to find a wifi adaptor that's compatible with your Linux distro. Personally, I've only tested the TP-Link Archer T3U Plus AC1300 Wireless USB Adapter which can be purchased on [Amazon](https://a.co/d/ipqSiyv) for less than $20 USD. In Raspberry Pi OS, it will be detected by default and connected as the wlan1 interface.
+
+I would recommend that you use the onboard wifi (typically wlan0) to connect to whichever network is the closest given the antenna isn't very powerful. This is usually going to be the EZ Share wifi network. You can then use the USB wifi adaptor to connect to your home network.
+
+You'll want to be directly connected to your Linux server if wifi is your only way to connect to the server because these changes will disconnect you from the network. We'll also assume that you've already run the script once which means the wifi connection information is already configured in ${HOME}/.ezshare. If you haven't run the script yet, you'll need to manually populate your wifi details instead of letting the commands below cat the required files.
+
+The example below shows the built-in wifi adaptor being connected to the EZ Share wifi network followed by our USB wifi adaptor being connected to our home network.
+
+```
+sudo nmcli device wifi connect $(cat ${HOME}/.ezshare/ezShareWifiSSID) password $(cat ${HOME}/.ezshare/ezShareWiFiPassword) ifname wlan0
+sudo nmcli device wifi connect $(cat ${HOME}/.ezshare/homeWiFiSSID) password $(cat ${HOME}/.ezshare/homeWiFiPassword) ifname wlan1
+```
+
+We can run an ifconfig to see we're connected to our home network, and the EZ Share network (192.168.4.x):
+
+```
+ifconfig
+...
+wlan0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
+        inet 192.168.4.2  netmask 255.255.255.0  broadcast 192.168.4.255
+        inet6 fe80::e0d:77ca:c9a6:acb0  prefixlen 64  scopeid 0x20<link>
+        ether 2c:cf:67:94:23:b1  txqueuelen 1000  (Ethernet)
+        RX packets 258  bytes 54747 (53.4 KiB)
+        RX errors 0  dropped 3  overruns 0  frame 0
+        TX packets 103  bytes 16649 (16.2 KiB)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+                                                                                                                                                   
+wlan1: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500                                                                                        
+        inet 192.168.0.65  netmask 255.255.255.0  broadcast 192.168.0.255                                                                          
+        inet6 fe80::f1dd:535:847f:6103  prefixlen 64  scopeid 0x20<link>                                                                           
+        ether f0:a7:31:8d:3a:0c  txqueuelen 1000  (Ethernet)                                                                                       
+        RX packets 2695  bytes 569145 (555.8 KiB)                                                                                                  
+        RX errors 0  dropped 18  overruns 0  frame 0                                                                                               
+        TX packets 45  bytes 7993 (7.8 KiB)                                                                                                        
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0    
+```
+
+Once you're connected to both wifi networks, you'll want to make sure that NetworkManager connects to the wifi networks using the correct wifi interface. Since we're already connected to our networks, we can associate the interfaces with our connection profiles using the command below. We'll also tell NetworkManager to bring the connections up when Network Manager starts.
+
+```
+sudo nmcli connection modify $(sudo nmcli -g GENERAL.CONNECTION device show wlan0) connection.interface-name wlan0 connection.autoconnect yes
+sudo nmcli connection modify $(sudo nmcli -g GENERAL.CONNECTION device show wlan1) connection.interface-name wlan1 connection.autoconnect yes
+```
+
+Now you can edit your crontab and configure the script to run once every 15 minutes. The --dedicated option will skip connecting to wifi networks and assume that everything is already configured. An example is shown below:
+
+```
+*/15 * * * * /home/pi/sync.sh --dedicated
+```
+
+#### Mac
+
 Firstly, at the time of writing there aren't any wifi adapters that are supported on Apple Silicon. Getting multiple wifi adapters working in Mac OS requires a compatible wifi adapter such as the TP-Link Archer T3U Plus AC1300 Wireless USB Adapter which can be purchased on [Amazon](https://a.co/d/ipqSiyv) for less than $20 USD. You can get a list of working adapters and download the latest release from [Github](https://github.com/chris1111/Wireless-USB-Big-Sur-Adapter?tab=readme-ov-file).
 
-You then need to disable System Integrity Protection (SIP) which can only be performed in Mac OS Recovery mode. Instructions for this as well as driver installation can be found [here](https://github.com/chris1111/Wireless-USB-Big-Sur-Adapter/discussions/115).
+If you're running the script on a Mac, you then need to disable System Integrity Protection (SIP) which can only be performed in Mac OS Recovery mode. Instructions for this as well as driver installation can be found [here](https://github.com/chris1111/Wireless-USB-Big-Sur-Adapter/discussions/115).
 
 Once the driver is installed and you've rebooted, there will be an icon for the Wireless Network Utility in your notification bar.
 
@@ -278,15 +332,13 @@ launchctl load ~/Library/LaunchAgents/EzshareSync.plist
 
 5. (Optional) Add ezshare.card to the /etc/hosts file
 
-This will allow the web interface to be accessed via http://ezshare.card/
+This will allow the web interface to be accessed via http://ezshare.card/ and while this isn't necessary for the script to function, it's sometimes useful.
 
 ```
 sudo cat | tee -a /etc/hosts <<EOF
 192.168.4.1\tezshare.card
 EOF
 ```
-
-Note this isn't needed for the script to function since the directory listing can be directly accessed via http://192.168.4.1/dir?dir=A: but if you want to access the web interface for any other reason, you'll need to perform step 5.
 
 6. Try it out!
 
